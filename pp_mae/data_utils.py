@@ -71,12 +71,12 @@ def undersample_kspace(img: np.ndarray, retain_fraction: float | None = None) ->
     if retain_fraction is None:
         retain_fraction = random.uniform(0.25, 0.75)
     kspace = np.fft.fft2(img)
-    H, W = img.shape[-2], img.shape[-1]
-    mask = np.zeros((H, W), dtype=bool)
+    H = img.shape[-2]
     n_keep = int(H * retain_fraction)
     rows = np.random.choice(H, n_keep, replace=False)
-    mask[rows, :] = True
-    kspace[..., ~mask, :] = 0
+    mask = np.ones(kspace.shape, dtype=bool)
+    mask[..., rows, :] = False   # zero out non-kept rows along second-to-last axis
+    kspace[mask] = 0
     return np.abs(np.fft.ifft2(kspace)).astype(np.float32)
 
 
