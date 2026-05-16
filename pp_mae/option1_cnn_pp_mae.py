@@ -233,24 +233,36 @@ class PPMAETrainer:
     """
     Minimal training loop for Option 1.
 
+    When adaptive=True the AdaptivePathologyLoss has learnable parameters
+    (log_C, severity_net, adjustment_net).  These are automatically added
+    to the optimizer so they are trained jointly with the denoiser.
+
     Usage:
-        trainer = PPMAETrainer(model, optimizer, device="cuda")
+        trainer = PPMAETrainer(model, optimizer, device="cuda", adaptive=True)
         for batch in dataloader:
             metrics = trainer.step(batch)
+            # metrics includes w_WT, w_TC, w_ET — the current learned weights
     """
 
     def __init__(
         self,
         model:     nn.Module,
-        optimizer: torch.optim.Optimizer,
-        device:    str = "cuda",
+        optimizer: torch.optim.Optimizer | None = None,
+        device:    str   = "cuda",
         lambda1:   float = 1.0,
         lambda2:   float = 0.5,
+        adaptive:  bool  = False,
+        lr:        float = 1e-4,
     ):
-        self.model  = model.to(device)
-        self.optim  = optimizer
-        self.device = device
-        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2)
+        self.model   = model.to(device)
+        self.device  = device
+        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2, adaptive=adaptive).to(device)
+
+        # When adaptive=True, loss_fn has learnable parameters that must be
+        # included in the optimizer alongside the model parameters.
+        all_params = list(model.parameters()) + list(self.loss_fn.parameters())
+        self.optim = optimizer if optimizer is not None else \
+                     torch.optim.AdamW(all_params, lr=lr, weight_decay=1e-5)
 
     @torch.no_grad()
     def validate(self, batch: dict) -> dict:
