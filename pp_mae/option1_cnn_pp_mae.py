@@ -252,14 +252,18 @@ class PPMAETrainer:
         lambda1:   float = 1.0,
         lambda2:   float = 0.5,
         adaptive:  bool  = False,
+        mode:      str   = "fixed",
         lr:        float = 1e-4,
     ):
         self.model   = model.to(device)
         self.device  = device
-        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2, adaptive=adaptive).to(device)
+        # Support legacy adaptive=True flag by mapping to mode="adaptive"
+        resolved_mode = "adaptive" if adaptive else mode
+        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2,
+                                 mode=resolved_mode).to(device)
 
-        # When adaptive=True, loss_fn has learnable parameters that must be
-        # included in the optimizer alongside the model parameters.
+        # When mode="adaptive"/"clinical_risk"/"combined", loss_fn has learnable
+        # parameters that must be included in the optimizer alongside the model.
         all_params = list(model.parameters()) + list(self.loss_fn.parameters())
         self.optim = optimizer if optimizer is not None else \
                      torch.optim.AdamW(all_params, lr=lr, weight_decay=1e-5)
