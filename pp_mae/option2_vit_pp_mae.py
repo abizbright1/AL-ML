@@ -346,14 +346,16 @@ class ViTPPMAETrainer:
     def __init__(
         self,
         model:        nn.Module,
-        optimizer:    torch.optim.Optimizer,
+        optimizer:    torch.optim.Optimizer | None = None,
         device:       str   = "cuda",
         lambda1:      float = 1.0,
         lambda2:      float = 0.5,
         warmup_steps: int   = 1000,
+        lr:           float = 1e-4,
     ):
         self.model     = model.to(device)
-        self.optim     = optimizer
+        self.optim     = optimizer if optimizer is not None else \
+                         torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.05)
         self.device    = device
         self.loss_fn   = PPMAELoss(lambda1=lambda1, lambda2=lambda2)
         self.warmup    = warmup_steps
