@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Option 1 — CNN-based PP-MAE  (U-Net backbone with saliency masking)
 ====================================================================
@@ -247,7 +248,7 @@ class PPMAETrainer:
     def __init__(
         self,
         model:     nn.Module,
-        optimizer: torch.optim.Optimizer | None = None,
+        optimizer: Optional[torch.optim.Optimizer] = None,
         device:    str   = "cuda",
         lambda1:   float = 1.0,
         lambda2:   float = 0.5,

@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Mathematically Derived Loss Components for PP-MAE.
 
@@ -323,7 +324,7 @@ class OptimalMaskRatio:
         return "\n".join(lines)
 
     def snr_from_image(self, image: torch.Tensor,
-                       seg_map: torch.Tensor | None = None) -> float:
+                       seg_map: Optional[torch.Tensor] = None) -> float:
         """
         Estimate SNR directly from an image using the MAD noise estimator.
 
@@ -487,8 +488,8 @@ class DerivedPPMAELoss(nn.Module):
         target:  torch.Tensor,               # (B, C, H, W) clean reference
         noisy:   torch.Tensor,               # (B, C, H, W) noisy input
         seg_map: torch.Tensor,               # (B, 1, H, W) tumour labels
-        mu:      torch.Tensor | None = None, # (B, D) encoder mean
-        log_var: torch.Tensor | None = None, # (B, D) encoder log-variance
+        mu:      Optional[torch.Tensor] = None, # (B, D) encoder mean
+        log_var: Optional[torch.Tensor] = None, # (B, D) encoder log-variance
     ) -> dict:
         """
         Returns a dict with all loss components for logging and analysis.

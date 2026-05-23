@@ -346,7 +346,7 @@ class ViTPPMAETrainer:
     def __init__(
         self,
         model:        nn.Module,
-        optimizer:    torch.optim.Optimizer | None = None,
+        optimizer:    Optional[torch.optim.Optimizer] = None,
         device:       str   = "cuda",
         lambda1:      float = 1.0,
         lambda2:      float = 0.5,

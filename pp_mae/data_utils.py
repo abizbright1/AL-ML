@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Data utilities for the PP-MAE glioma MRI pipeline.
 
@@ -63,7 +64,7 @@ def add_rician_noise(img: np.ndarray, sigma_range=(0.02, 0.12)) -> np.ndarray:
     return (np.sqrt((img + noise_r) ** 2 + noise_i ** 2)).astype(np.float32)
 
 
-def undersample_kspace(img: np.ndarray, retain_fraction: float | None = None) -> np.ndarray:
+def undersample_kspace(img: np.ndarray, retain_fraction: Optional[float] = None) -> np.ndarray:
     """
     Simulate partial Fourier undersampling.
     retain_fraction drawn uniformly from [0.25, 0.75] when None.
@@ -132,7 +133,7 @@ class GliomaSliceDataset(Dataset):
         self,
         data_root: str | Path,
         split: str = "train",
-        split_file: str | None = None,
+        split_file: Optional[str] = None,
         degrade: bool = True,
         degrade_mode: str = "random",
         slice_axis: int = 2,

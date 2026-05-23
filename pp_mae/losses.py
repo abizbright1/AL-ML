@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Shared loss functions for all PP-MAE options.
 
@@ -140,7 +141,7 @@ class PathologyLoss(nn.Module):
 
     REGION_WEIGHTS = {"WT": 1.0, "TC": 2.0, "ET": 3.0}
 
-    def __init__(self, region_weights: dict | None = None, base_loss: str = "l1"):
+    def __init__(self, region_weights: Optional[dict] = None, base_loss: str = "l1"):
         super().__init__()
         self.region_weights = region_weights or self.REGION_WEIGHTS
         self.loss_fn = nn.L1Loss(reduction="none") if base_loss == "l1" \
@@ -332,7 +333,7 @@ class ClinicalRiskScore(nn.Module):
 
     # ------------------------------------------------------------------
     def forward(self, target: torch.Tensor, masks: dict,
-                biomarkers: torch.Tensor | None = None) -> torch.Tensor:
+                biomarkers: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Args:
             target:     (B, C, H, W) clean reference image
@@ -355,7 +356,7 @@ class ClinicalRiskScore(nn.Module):
         return self.risk_net(features).squeeze(0)                    # (3,)
 
     def risk_summary(self, target: torch.Tensor, masks: dict,
-                     biomarkers: torch.Tensor | None = None) -> str:
+                     biomarkers: Optional[torch.Tensor] = None) -> str:
         with torch.no_grad():
             R = self.forward(target, masks, biomarkers).tolist()
         regions = ["WT", "TC", "ET"]
@@ -415,7 +416,7 @@ class ClinicalRiskPathologyLoss(nn.Module):
         pred:        torch.Tensor,               # (B, C, H, W)
         target:      torch.Tensor,               # (B, C, H, W)
         seg_map:     torch.Tensor,               # (B, 1, H, W)
-        biomarkers:  torch.Tensor | None = None, # (B, 4) or None
+        biomarkers:  Optional[torch.Tensor] = None, # (B, 4) or None
     ) -> tuple[torch.Tensor, dict]:
         """
         Returns:
@@ -465,7 +466,7 @@ class CrossModalConsistencyLoss(nn.Module):
 
     DEFAULT_PAIRS = [(1, 2), (2, 3)]   # T1Wce↔T2W, T2W↔FLAIR
 
-    def __init__(self, modality_pairs: list | None = None):
+    def __init__(self, modality_pairs: Optional[list] = None):
         super().__init__()
         self.pairs = modality_pairs or self.DEFAULT_PAIRS
 
@@ -542,7 +543,7 @@ class PPMAELoss(nn.Module):
         pred:       torch.Tensor,               # (B, C, H, W)
         target:     torch.Tensor,               # (B, C, H, W)
         seg_map:    torch.Tensor,               # (B, 1, H, W)
-        biomarkers: torch.Tensor | None = None, # (B, 4) optional clinical data
+        biomarkers: Optional[torch.Tensor] = None, # (B, 4) optional clinical data
     ) -> dict:
         l_global   = self.global_loss(pred, target)
         l_crossmod = self.crossmodal_loss(pred, target)

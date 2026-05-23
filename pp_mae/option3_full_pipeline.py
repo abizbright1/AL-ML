@@ -1,3 +1,4 @@
+from typing import Optional
 """
 Option 3 — End-to-End PP-MAE + Downstream Pipeline
 ====================================================
@@ -143,7 +144,7 @@ class SegmentationLoss(nn.Module):
 
     def __init__(
         self,
-        class_weights: torch.Tensor | None = None,
+        class_weights: Optional[torch.Tensor] = None,
         dice_weight:   float = 0.5,
     ):
         super().__init__()
@@ -183,7 +184,7 @@ class PPMAEPipeline(nn.Module):
 
     def __init__(
         self,
-        denoiser_kwargs: dict | None = None,
+        denoiser_kwargs: Optional[dict] = None,
         freeze_encoder:  bool = False,
     ):
         super().__init__()

@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn.functional as F
-from typing import Sequence
+from typing import Optional, Sequence
 
 
 # ---------------------------------------------------------------------------
@@ -239,10 +239,10 @@ def evaluate_full(
     target_imgs: list[np.ndarray],     # list of (C, H, W) ground truth images
     pred_segs: list[np.ndarray],       # predicted segmentation label maps
     target_segs: list[np.ndarray],     # ground truth segmentation label maps
-    grade_scores: np.ndarray | None = None,  # model probability outputs for grading
-    grade_labels: np.ndarray | None = None,  # 0/1 binary labels
-    idh_scores:   np.ndarray | None = None,
-    idh_labels:   np.ndarray | None = None,
+    grade_scores: Optional[np.ndarray] = None,  # model probability outputs for grading
+    grade_labels: Optional[np.ndarray] = None,  # 0/1 binary labels
+    idh_scores:   Optional[np.ndarray] = None,
+    idh_labels:   Optional[np.ndarray] = None,
 ) -> dict:
     """Aggregate all metrics across a dataset split."""
 
