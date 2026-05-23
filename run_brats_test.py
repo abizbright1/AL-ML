@@ -89,6 +89,7 @@ _args = _parser.parse_args()
 # ── Configuration ─────────────────────────────────────────────────────────────
 DEVICE     = 'cpu'
 OUT        = _args.out if _args.out else os.path.dirname(os.path.abspath(__file__))
+os.makedirs(OUT, exist_ok=True)   # create output dir if it doesn't exist
 D_EPOCHS   = _args.epochs
 S_EPOCHS   = _args.seg_epochs
 PATCH_SIZE = _args.patch_size
