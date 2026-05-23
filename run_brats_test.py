@@ -19,12 +19,25 @@ How to use with REAL BraTS data
        BraTS2021_00000_seg.nii.gz
      ...
 
-3. Set BRATS_ROOT below (or pass as command-line arg):
+3. Run with optional flags:
    python3 run_brats_test.py /path/to/BraTS2021_Training_Data
+   python3 run_brats_test.py /path/to/BraTS2021_Training_Data --max_subjects 20
+   python3 run_brats_test.py /path/to/BraTS2021_Training_Data --max_subjects 50 --epochs 30
+   python3 run_brats_test.py /path/to/BraTS2021_Training_Data --max_subjects 10 --out ~/results
 
 Demo mode (no files needed)
 ---------------------------
    python3 run_brats_test.py          # auto-detects no data, uses demo
+
+All command-line flags
+----------------------
+  brats_root             Path to BraTS training folder (positional, optional)
+  --max_subjects N       Use only the first N subjects  [default: 5]
+  --epochs N             Denoising training epochs      [default: 15]
+  --seg_epochs N         Segmentor training epochs      [default: 20]
+  --patch_size N         Spatial crop size (px)         [default: 96]
+  --sigma F              Rician noise sigma             [default: 0.08]
+  --out DIR              Output directory               [default: script dir]
 
 Output files
 ------------
@@ -38,7 +51,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import torch, sys, os, csv
+import torch, sys, os, csv, argparse
 import numpy as np
 sys.path.insert(0, '/home/user/AL-ML/pp_mae')
 
@@ -51,21 +64,41 @@ from segmentor  import UNetSegmentor, SegTrainer, seg_metrics
 from evaluation import psnr, ssim_numpy, nrmse
 from brats_loader import BraTSDataset, make_demo_brats
 
+# ── Parse command-line arguments ──────────────────────────────────────────────
+_parser = argparse.ArgumentParser(
+    description='PP-MAE vs baselines on BraTS data',
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+_parser.add_argument('brats_root',   nargs='?', default=None,
+                     help='Path to BraTS training folder (omit for demo mode)')
+_parser.add_argument('--max_subjects', type=int,   default=5,
+                     help='Use only the first N subjects (None = all)')
+_parser.add_argument('--epochs',       type=int,   default=15,
+                     help='Denoising training epochs')
+_parser.add_argument('--seg_epochs',   type=int,   default=20,
+                     help='Segmentor training epochs')
+_parser.add_argument('--patch_size',   type=int,   default=96,
+                     help='Spatial crop size in pixels (must be divisible by 8)')
+_parser.add_argument('--sigma',        type=float, default=0.08,
+                     help='Rician noise sigma')
+_parser.add_argument('--out',          type=str,   default=None,
+                     help='Output directory for plots and CSV')
+_args = _parser.parse_args()
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 DEVICE     = 'cpu'
-OUT        = '/home/user/AL-ML'
-D_EPOCHS   = 15        # denoising training epochs
-S_EPOCHS   = 20        # segmentor training epochs
-PATCH_SIZE = 96        # spatial patch size (must be divisible by 8)
-SIGMA      = 0.08      # Rician noise sigma
+OUT        = _args.out if _args.out else os.path.dirname(os.path.abspath(__file__))
+D_EPOCHS   = _args.epochs
+S_EPOCHS   = _args.seg_epochs
+PATCH_SIZE = _args.patch_size
+SIGMA      = _args.sigma
 SEED       = 42
 BATCH_SIZE = 4
-MAX_SUBJ   = 5         # use first N subjects (set None for all)
+MAX_SUBJ   = _args.max_subjects
 
 torch.manual_seed(SEED); np.random.seed(SEED)
 
 # ── Detect data source ────────────────────────────────────────────────────────
-BRATS_ROOT = sys.argv[1] if len(sys.argv) > 1 else None
+BRATS_ROOT = _args.brats_root
 USE_REAL   = False
 
 if BRATS_ROOT and os.path.isdir(BRATS_ROOT):
