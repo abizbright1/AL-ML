@@ -53,7 +53,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import torch, sys, os, csv, argparse
 import numpy as np
-sys.path.insert(0, '/home/user/AL-ML/pp_mae')
+# resolve pp_mae relative to this script's location (works on any machine)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_SCRIPT_DIR, 'pp_mae'))
 
 from option1_cnn_pp_mae import CNNPPMAE, PPMAETrainer
 from baselines import (DnCNN, DnCNNTrainer,
