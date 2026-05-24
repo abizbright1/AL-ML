@@ -268,6 +268,11 @@ class PPMAETrainer:
         all_params = list(model.parameters()) + list(self.loss_fn.parameters())
         self.optim = optimizer if optimizer is not None else \
                      torch.optim.AdamW(all_params, lr=lr, weight_decay=1e-5)
+        # Cosine annealing: lr decays smoothly from lr → lr/100 over n_epochs
+        # Initialised with T_max=50; call scheduler.step() each epoch.
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optim, T_max=50, eta_min=lr / 100
+        )
 
     @torch.no_grad()
     def validate(self, batch: dict) -> dict:

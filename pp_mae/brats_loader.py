@@ -225,12 +225,28 @@ class BraTSDataset(Dataset):
             clean_channels.append(s)
         clean = np.stack(clean_channels, axis=0)           # (4,H,W)
 
+        # Segmentation (must be augmented consistently with image)
+        seg_slice = self._extract_slice(vols['seg'], sl).astype('int64')
+        seg_slice = self._centre_crop(seg_slice)           # (H,W)
+
+        # ── Data augmentation (training-time only) ──────────────────────────
+        # Random horizontal flip (50% chance) — applied to both image & seg
+        if np.random.rand() > 0.5:
+            clean     = clean[:, :, ::-1].copy()
+            seg_slice = seg_slice[:, ::-1].copy()
+        # Random vertical flip (50% chance)
+        if np.random.rand() > 0.5:
+            clean     = clean[:, ::-1, :].copy()
+            seg_slice = seg_slice[::-1, :].copy()
+        # Random intensity jitter per modality (±5%) — simulates scanner variation
+        for c in range(clean.shape[0]):
+            scale = np.random.uniform(0.95, 1.05)
+            clean[c] = (clean[c] * scale).clip(0., 1.)
+
         # Add Rician noise
         noisy = _add_rician_noise(clean, self.sigma) if self.sigma > 0 else clean.copy()
 
-        # Segmentation
-        seg_slice = self._extract_slice(vols['seg'], sl).astype('int64')
-        seg_slice = self._centre_crop(seg_slice)[np.newaxis]  # (1,H,W)
+        seg_slice = seg_slice[np.newaxis]  # (1,H,W)
         # Clamp to valid labels [0,3]
         seg_slice = np.clip(seg_slice, 0, 3)
 

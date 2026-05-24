@@ -151,22 +151,22 @@ C = 4  # modalities
 
 MODELS = {
     'PP-MAE (clinical_risk)': (
-        CNNPPMAE(C, base_ch=16, depth=3),
-        lambda m: PPMAETrainer(m, device=DEVICE, mode='clinical_risk', lr=1e-4)),
+        CNNPPMAE(C, base_ch=32, depth=4),           # ↑ bigger: 32ch, 4 stages
+        lambda m: PPMAETrainer(m, device=DEVICE, mode='clinical_risk', lr=3e-4)),
     'PP-MAE (fixed)': (
-        CNNPPMAE(C, base_ch=16, depth=3),
-        lambda m: PPMAETrainer(m, device=DEVICE, mode='fixed', lr=1e-4)),
+        CNNPPMAE(C, base_ch=32, depth=4),           # ↑ bigger: 32ch, 4 stages
+        lambda m: PPMAETrainer(m, device=DEVICE, mode='fixed', lr=3e-4)),
     'DnCNN': (
-        DnCNN(C, features=32, num_layers=10),
+        DnCNN(C, features=64, num_layers=17),        # ↑ original DnCNN paper size
         lambda m: DnCNNTrainer(m, device=DEVICE, lr=1e-3)),
     'UNet-L1': (
-        StandardUNet(C, base_ch=16),
+        StandardUNet(C, base_ch=32),                 # ↑ bigger baseline
         lambda m: StandardUNetTrainer(m, device=DEVICE, lr=1e-4)),
     'Noise2Noise': (
-        Noise2Noise(C, features=32, num_layers=10),
+        Noise2Noise(C, features=64, num_layers=17),  # ↑ match DnCNN size
         lambda m: Noise2NoiseTrainer(m, device=DEVICE, lr=1e-3)),
     'REDNet': (
-        REDNet(C, features=32, num_layers=4),
+        REDNet(C, features=64, num_layers=6),
         lambda m: REDNetTrainer(m, device=DEVICE, lr=1e-4)),
 }
 
@@ -188,8 +188,15 @@ for name, (model, make_trainer) in MODELS.items():
     for ep in range(1, D_EPOCHS + 1):
         loss = run_epoch(trainer, train_loader)
         hist.append(loss)
-        if ep % 5 == 0 or ep == 1:
-            print(f"    Ep {ep:2d}/{D_EPOCHS}  loss={loss:.4f}", flush=True)
+        # Step LR scheduler each epoch (PP-MAE trainers have scheduler)
+        if hasattr(trainer, 'scheduler'):
+            trainer.scheduler.step()
+            lr_now = trainer.scheduler.get_last_lr()[0]
+            if ep % 5 == 0 or ep == 1:
+                print(f"    Ep {ep:2d}/{D_EPOCHS}  loss={loss:.4f}  lr={lr_now:.2e}", flush=True)
+        else:
+            if ep % 5 == 0 or ep == 1:
+                print(f"    Ep {ep:2d}/{D_EPOCHS}  loss={loss:.4f}", flush=True)
     histories[name] = hist
     trained[name]   = model
 
