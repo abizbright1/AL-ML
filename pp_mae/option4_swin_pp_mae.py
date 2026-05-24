@@ -101,8 +101,8 @@ def window_partition(x: torch.Tensor, window_size: int) -> tuple[torch.Tensor, t
     if H_pad or W_pad:
         x = F.pad(x, (0, 0, 0, W_pad, 0, H_pad))
     Hp, Wp = H + H_pad, W + W_pad
-    x = x.view(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
-    return x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C), (H, W)
+    x = x.reshape(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
+    return x.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(-1, window_size, window_size, C), (H, W)
 
 
 def window_reverse(windows: torch.Tensor, window_size: int, orig_hw: tuple) -> torch.Tensor:
@@ -112,8 +112,8 @@ def window_reverse(windows: torch.Tensor, window_size: int, orig_hw: tuple) -> t
     Wp = math.ceil(W_orig / window_size) * window_size
     n_windows_h, n_windows_w = Hp // window_size, Wp // window_size
     B = windows.shape[0] // (n_windows_h * n_windows_w)
-    x = windows.view(B, n_windows_h, n_windows_w, window_size, window_size, -1)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, Hp, Wp, -1)
+    x = windows.reshape(B, n_windows_h, n_windows_w, window_size, window_size, -1)
+    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(B, Hp, Wp, -1)
     return x[:, :H_orig, :W_orig, :].contiguous()
 
 
@@ -166,10 +166,10 @@ class SwinBlock(nn.Module):
 
         windows, orig_hw = window_partition(x, ws)   # (B*nW, ws, ws, C)
         nW = windows.shape[0]
-        tokens = windows.view(nW, ws * ws, C)
+        tokens = windows.reshape(nW, ws * ws, C)
 
         tokens, _ = self.attn(tokens, tokens, tokens)
-        windows = tokens.view(nW, ws, ws, C)
+        windows = tokens.reshape(nW, ws, ws, C)
         x = window_reverse(windows, ws, orig_hw)
 
         if self.shift_size > 0:
@@ -399,9 +399,9 @@ class SwinPPMAE(nn.Module):
         tokens = self.patch_norm(tokens)
 
         # Cross-modal attention on patch tokens
-        flat = tokens.view(B, Ph * Pw, E)
+        flat = tokens.reshape(B, Ph * Pw, E)
         flat = self._apply_cross_modal(flat, B, Ph, Pw)
-        tokens = flat.view(B, Ph, Pw, E)
+        tokens = flat.reshape(B, Ph, Pw, E)
 
         # Encoder with saliency reweighting
         skips = []

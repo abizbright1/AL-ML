@@ -324,7 +324,7 @@ class ViTPPMAE2D(nn.Module):
 
         # Pool segmentation to patch grid
         seg_pool = F.max_pool2d(seg.float(), kernel_size=p, stride=p)   # (B,1,h,w)
-        tumour   = (seg_pool > 0).view(B, N)   # (B, N) bool
+        tumour   = (seg_pool > 0).reshape(B, N)   # (B, N) bool
 
         ids_keep_list = []
         ids_mask_list = []
@@ -1048,9 +1048,9 @@ class _WindowAttnBlock(nn.Module):
             x = F.pad(x, (0, 0, 0, pad_w, 0, pad_h))
         Hp, Wp = H + pad_h, W + pad_w
 
-        x = x.view(B, Hp // ws, ws, Wp // ws, ws, C)
+        x = x.reshape(B, Hp // ws, ws, Wp // ws, ws, C)
         x = x.permute(0, 1, 3, 2, 4, 5).contiguous()   # (B, nH, nW, ws, ws, C)
-        windows = x.view(-1, ws * ws, C)                 # (B*nH*nW, ws^2, C)
+        windows = x.reshape(-1, ws * ws, C)              # (B*nH*nW, ws^2, C)
         return windows, Hp, Wp, H, W
 
     def _unpartition_windows(
@@ -1062,8 +1062,8 @@ class _WindowAttnBlock(nn.Module):
     ) -> torch.Tensor:
         """Reconstruct (B, H, W, C) from windows."""
         ws = self.window_size
-        x  = windows.view(B, Hp // ws, Wp // ws, ws, ws, -1)
-        x  = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, Hp, Wp, -1)
+        x  = windows.reshape(B, Hp // ws, Wp // ws, ws, ws, -1)
+        x  = x.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(B, Hp, Wp, -1)
         return x[:, :H, :W, :].contiguous()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
