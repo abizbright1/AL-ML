@@ -63,6 +63,12 @@ import torch.nn.functional as F
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
+# Suppress benign PyTorch warning about nested tensors with Pre-LN transformers
+warnings.filterwarnings(
+    'ignore',
+    message='enable_nested_tensor is True.*norm_first',
+    category=UserWarning)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 1.  RadioTransformer
