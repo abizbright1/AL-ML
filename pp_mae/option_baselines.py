@@ -32,6 +32,57 @@ import torch.nn.functional as F
 from losses import PPMAELoss
 
 
+# ---------------------------------------------------------------------------
+# MPS-compatible multi-head attention (shared across all baseline models)
+# ---------------------------------------------------------------------------
+
+class _MPSMHA(nn.Module):
+    """
+    Drop-in replacement for nn.MultiheadAttention(batch_first=True).
+
+    PyTorch's built-in MultiheadAttention uses internal .view() calls in its
+    C++ backward kernel that fail on Apple Silicon MPS with:
+      "RuntimeError: view size is not compatible … Use .reshape() instead."
+
+    This implementation uses F.scaled_dot_product_attention and only
+    .reshape() / .permute(), which are fully MPS-compatible.
+    """
+
+    def __init__(self, embed_dim: int, num_heads: int, batch_first: bool = True):
+        super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim  = embed_dim // num_heads
+
+        self.q_proj   = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.k_proj   = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.v_proj   = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
+
+    def forward(
+        self,
+        query:            torch.Tensor,
+        key:              torch.Tensor,
+        value:            torch.Tensor,
+        attn_mask:        Optional[torch.Tensor] = None,
+        key_padding_mask: Optional[torch.Tensor] = None,
+        need_weights:     bool = True,
+    ):
+        B, S, E = query.shape
+        T = key.shape[1]
+        H, D = self.num_heads, self.head_dim
+
+        q = self.q_proj(query).reshape(B, S, H, D).permute(0, 2, 1, 3)  # (B,H,S,D)
+        k = self.k_proj(key  ).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
+        v = self.v_proj(value).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
+
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        out = out.permute(0, 2, 1, 3).reshape(B, S, E)
+        out = self.out_proj(out)
+        return out, None   # mirrors nn.MultiheadAttention return signature
+
+
 # =============================================================================
 # A.  ViT / MAE FAMILY  (Option 2 baselines)
 # =============================================================================
@@ -83,7 +134,7 @@ class _ViTBlock(nn.Module):
     def __init__(self, dim: int, n_heads: int, mlp_ratio: float = 4.0):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.attn  = nn.MultiheadAttention(dim, n_heads, batch_first=True)
+        self.attn  = _MPSMHA(dim, n_heads)
         self.norm2 = nn.LayerNorm(dim)
         mlp_dim    = int(dim * mlp_ratio)
         self.ffn   = nn.Sequential(
@@ -1024,7 +1075,7 @@ class _WindowAttnBlock(nn.Module):
         self.dim         = dim
         self.window_size = window_size
         self.norm1 = nn.LayerNorm(dim)
-        self.attn  = nn.MultiheadAttention(dim, n_heads, batch_first=True)
+        self.attn  = _MPSMHA(dim, n_heads)
         self.norm2 = nn.LayerNorm(dim)
         self.ffn   = nn.Sequential(
             nn.Linear(dim, dim * 4),
