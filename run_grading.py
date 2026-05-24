@@ -66,6 +66,10 @@ from grading             import (GradingHead, GradingTrainer,
                                   grading_metrics, get_roc_curve,
                                   assign_demo_grade_labels,
                                   FEATURE_NAMES)
+from grading_baselines   import (RadioTransformer, RadioTransformerTrainer,
+                                  CBAMResNet, DINOv2Probe,
+                                  SliceGradingTrainer,
+                                  build_slice_dataset, aggregate_to_subject)
 
 # ── CLI arguments ─────────────────────────────────────────────────────────────
 _p = argparse.ArgumentParser(
@@ -394,6 +398,134 @@ for method_name, model in EVAL_MODELS.items():
           flush=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 5B.  Grading Architecture Baselines (RadioTransformer, CBAM-ResNet, DINOv2)
+#      All three use PP-MAE (clinical_risk) denoised images as input so we
+#      compare GRADING ARCHITECTURES fairly (not denoising quality).
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n" + "="*65, flush=True)
+print("  STEP 3B — GRADING ARCHITECTURE BASELINES", flush=True)
+print("  (using PP-MAE denoised images as input)", flush=True)
+print("="*65, flush=True)
+
+pp_mae_model = trained_models.get('PP-MAE (clinical_risk)')
+
+# ── Re-extract PP-MAE subject-level features (7-dim) for RadioTransformer ──
+print("\n  [Extracting PP-MAE features for RadioTransformer...]", flush=True)
+tr_feats_pp, tr_labels_pp = extract_all_features(
+    pp_mae_model, train_loader, seg_model, grade_labels, train_subjects)
+te_feats_pp, te_labels_pp = extract_all_features(
+    pp_mae_model, test_loader,  seg_model, grade_labels, test_subjects)
+
+mu_pp   = tr_feats_pp.mean(dim=0)
+std_pp  = tr_feats_pp.std(dim=0).clamp(min=1e-6)
+tr_pp_n = (tr_feats_pp - mu_pp) / std_pp
+te_pp_n = (te_feats_pp - mu_pp) / std_pp
+
+n_pos_pp = tr_labels_pp.sum().item()
+n_neg_pp = len(tr_labels_pp) - n_pos_pp
+pos_w_pp = n_neg_pp / max(n_pos_pp, 1)
+
+# ── 1. RadioTransformer ────────────────────────────────────────────────────
+print("\n  [RadioTransformer]", flush=True)
+rt_model   = RadioTransformer(n_features=7, d_model=64, n_heads=4, n_layers=2)
+rt_trainer = RadioTransformerTrainer(
+    rt_model, device=DEVICE, lr=1e-3, pos_weight=pos_w_pp)
+
+for ep in range(1, G_EPOCHS + 1):
+    loss = rt_trainer.step(tr_pp_n, tr_labels_pp.float())
+    if ep == 1 or ep % 20 == 0:
+        print(f"    [grader] Ep {ep:2d}/{G_EPOCHS}  loss={loss:.4f}", flush=True)
+
+rt_probs   = rt_trainer.predict(te_pp_n)
+rt_metrics = grading_metrics(rt_probs, te_labels_pp)
+all_results['RadioTransformer'] = rt_metrics
+all_probs['RadioTransformer']   = rt_probs.numpy()
+print(f"    AUC={rt_metrics['auc']:.3f}  "
+      f"Acc={rt_metrics['accuracy']:.3f}  "
+      f"Sens={rt_metrics['sensitivity']:.3f}  "
+      f"Spec={rt_metrics['specificity']:.3f}", flush=True)
+
+# ── Build denoised-slice datasets for slice-level models ──────────────────
+print("\n  [Building denoised slice datasets...]", flush=True)
+tr_slices, tr_slice_labels, tr_subj_names = build_slice_dataset(
+    train_loader, pp_mae_model, grade_labels, train_subjects, DEVICE)
+te_slices, te_slice_labels, te_subj_names = build_slice_dataset(
+    test_loader,  pp_mae_model, grade_labels, test_subjects,  DEVICE)
+
+print(f"  Train slices: {len(tr_slices)}  |  Test slices: {len(te_slices)}", flush=True)
+
+
+def _train_slice_model(trainer, tr_s, tr_l, epochs, batch_size, name):
+    """Mini-batch training loop for slice-level models."""
+    for ep in range(1, epochs + 1):
+        idx     = torch.randperm(len(tr_s))
+        ep_loss = 0.0
+        n_batch = 0
+        for start in range(0, len(tr_s), batch_size):
+            bi   = idx[start:start + batch_size]
+            loss = trainer.step(tr_s[bi], tr_l[bi].float())
+            ep_loss += loss
+            n_batch += 1
+        ep_loss /= max(n_batch, 1)
+        if ep == 1 or ep % 20 == 0:
+            print(f"    [grader] Ep {ep:2d}/{epochs}  loss={ep_loss:.4f}", flush=True)
+
+
+def _eval_slice_model(trainer, te_s, te_subj, batch_size):
+    """Predict slice-level probs in batches."""
+    parts = []
+    for start in range(0, len(te_s), batch_size):
+        parts.append(trainer.predict_slice(te_s[start:start + batch_size]))
+    return torch.cat(parts) if parts else torch.zeros(1)
+
+
+# ── 2. CBAM-ResNet ─────────────────────────────────────────────────────────
+print("\n  [CBAM-ResNet]", flush=True)
+cbam_model   = CBAMResNet(in_channels=C, base_ch=16)
+cbam_trainer = SliceGradingTrainer(
+    cbam_model, device=DEVICE, lr=1e-4, pos_weight=pos_w_pp)
+
+_train_slice_model(cbam_trainer, tr_slices, tr_slice_labels,
+                   G_EPOCHS, BATCH_SIZE, 'CBAM-ResNet')
+
+cbam_slice_probs = _eval_slice_model(cbam_trainer, te_slices,
+                                     te_subj_names, BATCH_SIZE)
+cbam_probs, cbam_labels = aggregate_to_subject(
+    cbam_slice_probs, te_subj_names, grade_labels, test_subjects, mode='max')
+cbam_metrics = grading_metrics(cbam_probs, cbam_labels)
+all_results['CBAM-ResNet'] = cbam_metrics
+all_probs['CBAM-ResNet']   = cbam_probs.numpy()
+print(f"    AUC={cbam_metrics['auc']:.3f}  "
+      f"Acc={cbam_metrics['accuracy']:.3f}  "
+      f"Sens={cbam_metrics['sensitivity']:.3f}  "
+      f"Spec={cbam_metrics['specificity']:.3f}", flush=True)
+
+# ── 3. DINOv2Probe ─────────────────────────────────────────────────────────
+print("\n  [DINOv2Probe]", flush=True)
+dino_model   = DINOv2Probe(img_size=PATCH_SIZE, use_dino=True, device=DEVICE)
+dino_trainer = SliceGradingTrainer(
+    dino_model, device=DEVICE, lr=1e-3, pos_weight=pos_w_pp)
+
+_train_slice_model(dino_trainer, tr_slices, tr_slice_labels,
+                   G_EPOCHS, BATCH_SIZE, 'DINOv2Probe')
+
+dino_slice_probs = _eval_slice_model(dino_trainer, te_slices,
+                                     te_subj_names, BATCH_SIZE)
+dino_probs, dino_labels = aggregate_to_subject(
+    dino_slice_probs, te_subj_names, grade_labels, test_subjects, mode='max')
+dino_metrics = grading_metrics(dino_probs, dino_labels)
+all_results['DINOv2Probe'] = dino_metrics
+all_probs['DINOv2Probe']   = dino_probs.numpy()
+print(f"    AUC={dino_metrics['auc']:.3f}  "
+      f"Acc={dino_metrics['accuracy']:.3f}  "
+      f"Sens={dino_metrics['sensitivity']:.3f}  "
+      f"Spec={dino_metrics['specificity']:.3f}", flush=True)
+
+# Ensure all_labels_np is aligned (test subjects are the same across methods)
+if all_labels_np is None:
+    all_labels_np = te_labels_pp.numpy()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6.  Save CSV
 # ─────────────────────────────────────────────────────────────────────────────
 csv_path = os.path.join(OUT, 'grading_results.csv')
@@ -418,18 +550,21 @@ METHOD_NAMES = list(all_results.keys())
 
 # Colour scheme: PP-MAE = blue, baselines = orange shades, no-denoise = grey
 def method_colour(name):
-    if name == 'No Denoising':         return '#9E9E9E'
+    if name == 'No Denoising':           return '#9E9E9E'
     if name == 'PP-MAE (clinical_risk)': return '#1565C0'
-    if name == 'DnCNN':                return '#E65100'
-    if name == 'UNet-L1':              return '#F57C00'
-    if name == 'Noise2Noise':          return '#EF6C00'
-    if name == 'REDNet':               return '#FF8F00'
+    if name == 'DnCNN':                  return '#E65100'
+    if name == 'UNet-L1':                return '#F57C00'
+    if name == 'Noise2Noise':            return '#EF6C00'
+    if name == 'REDNet':                 return '#FF8F00'
+    if name == 'RadioTransformer':       return '#6A1B9A'   # purple
+    if name == 'CBAM-ResNet':            return '#00695C'   # teal
+    if name == 'DINOv2Probe':            return '#AD1457'   # deep pink
     return '#607D8B'
 
 colours = [method_colour(n) for n in METHOD_NAMES]
 
 # ── Figure 1: AUC Bar Chart ───────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(11, 5))
+fig, ax = plt.subplots(figsize=(15, 5))
 aucs  = [all_results[n]['auc']  for n in METHOD_NAMES]
 accs  = [all_results[n]['accuracy'] for n in METHOD_NAMES]
 bars  = ax.bar(range(len(METHOD_NAMES)), aucs, color=colours,
@@ -450,11 +585,14 @@ for bar, auc in zip(bars, aucs):
             f'{auc:.3f}', ha='center', va='bottom',
             fontsize=10, fontweight='bold')
 pp_p = mpatches.Patch(color='#1565C0', label='PP-MAE (ours)')
-bl_p = mpatches.Patch(color='#E65100', label='Baselines')
+bl_p = mpatches.Patch(color='#E65100', label='Denoising baselines')
 nd_p = mpatches.Patch(color='#9E9E9E', label='No Denoising')
-ax.legend(handles=[pp_p, bl_p, nd_p,
+rt_p = mpatches.Patch(color='#6A1B9A', label='RadioTransformer (SOTA)')
+cb_p = mpatches.Patch(color='#00695C', label='CBAM-ResNet (SOTA)')
+di_p = mpatches.Patch(color='#AD1457', label='DINOv2Probe (SOTA)')
+ax.legend(handles=[pp_p, bl_p, nd_p, rt_p, cb_p, di_p,
                    plt.Line2D([0],[0], color='red', ls='--', label='Random')],
-          loc='upper right', fontsize=9)
+          loc='upper right', fontsize=8, ncol=2)
 plt.tight_layout()
 auc_path = os.path.join(OUT, 'grading_auc.png')
 plt.savefig(auc_path, dpi=150, bbox_inches='tight')
@@ -520,9 +658,17 @@ print(f"  Saved grading_features.png", flush=True)
 
 # ── Figure 4: Confusion Matrices ──────────────────────────────────────────────
 n_methods = len(METHOD_NAMES)
-fig, axes = plt.subplots(1, n_methods, figsize=(n_methods * 3.2, 3.5))
-if n_methods == 1:
-    axes = [axes]
+# Arrange in 2 rows if many methods, to keep the figure readable
+if n_methods <= 5:
+    ncols_cm, nrows_cm = n_methods, 1
+else:
+    ncols_cm = (n_methods + 1) // 2
+    nrows_cm = 2
+fig, axes = plt.subplots(nrows_cm, ncols_cm,
+                          figsize=(ncols_cm * 3.2, nrows_cm * 3.5))
+axes = np.array(axes).flatten()   # always 1-D, hide any extras
+for ax in axes[n_methods:]:
+    ax.set_visible(False)
 
 for ax, name in zip(axes, METHOD_NAMES):
     m  = all_results[name]
@@ -559,22 +705,26 @@ for name in METHOD_NAMES:
                       f'{m["sensitivity"]:.3f}', f'{m["specificity"]:.3f}',
                       f'{m["f1"]:.3f}'])
 
-fig, ax = plt.subplots(figsize=(13, 4))
+row_height = max(1.6, 9.0 / max(len(cell_data), 1))
+fig, ax = plt.subplots(figsize=(14, max(4, len(cell_data) * row_height)))
 ax.axis('off')
 tbl = ax.table(cellText=cell_data, colLabels=col_labels,
                cellLoc='center', loc='center')
 tbl.auto_set_font_size(False)
 tbl.set_fontsize(10)
-tbl.scale(1, 2.2)
+tbl.scale(1, 2.0)
 
+SOTA_NAMES = {'RadioTransformer', 'CBAM-ResNet', 'DINOv2Probe'}
 for (row, col), cell in tbl.get_celld().items():
     if row == 0:
         cell.set_facecolor('#1A237E')
         cell.set_text_props(color='white', fontweight='bold')
     elif row > 0 and 'PP-MAE' in cell_data[row-1][0]:
-        cell.set_facecolor('#BBDEFB')
+        cell.set_facecolor('#BBDEFB')           # blue tint — PP-MAE
     elif row > 0 and cell_data[row-1][0] == 'No Denoising':
-        cell.set_facecolor('#F5F5F5')
+        cell.set_facecolor('#F5F5F5')           # grey — no denoising
+    elif row > 0 and cell_data[row-1][0] in SOTA_NAMES:
+        cell.set_facecolor('#F3E5F5')           # purple tint — SOTA baselines
     else:
         cell.set_facecolor('#FFF3E0' if row % 2 else '#FFFFFF')
     cell.set_edgecolor('#BDBDBD')
