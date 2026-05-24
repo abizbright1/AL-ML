@@ -87,7 +87,12 @@ _parser.add_argument('--out',          type=str,   default=None,
 _args = _parser.parse_args()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DEVICE     = 'cpu'
+if torch.cuda.is_available():
+    DEVICE = 'cuda'
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    DEVICE = 'mps'
+else:
+    DEVICE = 'cpu'
 OUT        = _args.out if _args.out else os.path.dirname(os.path.abspath(__file__))
 os.makedirs(OUT, exist_ok=True)   # create output dir if it doesn't exist
 D_EPOCHS   = _args.epochs

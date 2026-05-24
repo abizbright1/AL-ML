@@ -89,7 +89,12 @@ _p.add_argument('--sigma',        type=float, default=0.08)
 _p.add_argument('--out',          type=str,   default=None)
 _args = _p.parse_args()
 
-DEVICE     = 'cpu'
+if torch.cuda.is_available():
+    DEVICE = 'cuda'
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    DEVICE = 'mps'
+else:
+    DEVICE = 'cpu'
 OUT        = _args.out or _SCRIPT_DIR
 D_EPOCHS   = _args.epochs
 S_EPOCHS   = _args.seg_epochs
@@ -387,9 +392,9 @@ for method_name, model in EVAL_MODELS.items():
     metrics = grading_metrics(probs, te_labels)
 
     all_results[method_name] = metrics
-    all_probs[method_name]   = probs.numpy()
+    all_probs[method_name]   = .detach().cpu().numpy()
     if all_labels_np is None:
-        all_labels_np = te_labels.numpy()
+        all_labels_np = .detach().cpu().numpy()
 
     print(f"    AUC={metrics['auc']:.3f}  "
           f"Acc={metrics['accuracy']:.3f}  "
@@ -439,7 +444,7 @@ for ep in range(1, G_EPOCHS + 1):
 rt_probs   = rt_trainer.predict(te_pp_n)
 rt_metrics = grading_metrics(rt_probs, te_labels_pp)
 all_results['RadioTransformer'] = rt_metrics
-all_probs['RadioTransformer']   = rt_probs.numpy()
+all_probs['RadioTransformer']   = rt_.detach().cpu().numpy()
 print(f"    AUC={rt_metrics['auc']:.3f}  "
       f"Acc={rt_metrics['accuracy']:.3f}  "
       f"Sens={rt_metrics['sensitivity']:.3f}  "
@@ -494,7 +499,7 @@ cbam_probs, cbam_labels = aggregate_to_subject(
     cbam_slice_probs, te_subj_names, grade_labels, test_subjects, mode='max')
 cbam_metrics = grading_metrics(cbam_probs, cbam_labels)
 all_results['CBAM-ResNet'] = cbam_metrics
-all_probs['CBAM-ResNet']   = cbam_probs.numpy()
+all_probs['CBAM-ResNet']   = cbam_.detach().cpu().numpy()
 print(f"    AUC={cbam_metrics['auc']:.3f}  "
       f"Acc={cbam_metrics['accuracy']:.3f}  "
       f"Sens={cbam_metrics['sensitivity']:.3f}  "
@@ -515,7 +520,7 @@ dino_probs, dino_labels = aggregate_to_subject(
     dino_slice_probs, te_subj_names, grade_labels, test_subjects, mode='max')
 dino_metrics = grading_metrics(dino_probs, dino_labels)
 all_results['DINOv2Probe'] = dino_metrics
-all_probs['DINOv2Probe']   = dino_probs.numpy()
+all_probs['DINOv2Probe']   = dino_.detach().cpu().numpy()
 print(f"    AUC={dino_metrics['auc']:.3f}  "
       f"Acc={dino_metrics['accuracy']:.3f}  "
       f"Sens={dino_metrics['sensitivity']:.3f}  "
@@ -523,7 +528,7 @@ print(f"    AUC={dino_metrics['auc']:.3f}  "
 
 # Ensure all_labels_np is aligned (test subjects are the same across methods)
 if all_labels_np is None:
-    all_labels_np = te_labels_pp.numpy()
+    all_labels_np = .detach().cpu().numpy()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6.  Save CSV
@@ -630,8 +635,8 @@ lgg_mask = te_labels_raw == 0
 
 fig, axes = plt.subplots(1, 7, figsize=(20, 5))
 for fi, (ax, fname) in enumerate(zip(axes, FEATURE_NAMES)):
-    gbm_vals = te_feats_raw[gbm_mask, fi].numpy()
-    lgg_vals = te_feats_raw[lgg_mask, fi].numpy()
+    gbm_vals = te_feats_raw[gbm_mask, fi].detach().cpu().numpy()
+    lgg_vals = te_feats_raw[lgg_mask, fi].detach().cpu().numpy()
 
     # Box plots for each class
     bp = ax.boxplot(

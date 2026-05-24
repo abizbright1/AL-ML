@@ -307,8 +307,8 @@ def grading_metrics(
     Returns:
         dict of metric_name → float
     """
-    probs_np  = probs.float().numpy()
-    labels_np = labels.long().numpy()
+    probs_np  = probs.float().detach().cpu().numpy()
+    labels_np = labels.long().detach().cpu().numpy()
     preds_np  = (probs_np >= threshold).astype(int)
 
     TP = int(((preds_np == 1) & (labels_np == 1)).sum())
