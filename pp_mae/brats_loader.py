@@ -7,23 +7,29 @@ Supports two sources:
      in the same shape / format as BraTS, so all downstream code
      works identically — swap in real files when you have them)
 
-BraTS folder layout expected (Task1 / 2021 / 2023 style):
+BraTS 2021 folder layout:
   root_dir/
     BraTS2021_00000/
       BraTS2021_00000_t1.nii.gz
       BraTS2021_00000_t1ce.nii.gz
       BraTS2021_00000_t2.nii.gz
       BraTS2021_00000_flair.nii.gz
-      BraTS2021_00000_seg.nii.gz   (optional — absent at test time)
-    BraTS2021_00001/
-      ...
+      BraTS2021_00000_seg.nii.gz
+
+BraTS 2023 folder layout (Kaggle: rafi01001/brats-2023):
+  root_dir/
+    BraTS-GLI-00000-000/
+      BraTS-GLI-00000-000-t1n.nii.gz   (T1 native  → mapped to t1)
+      BraTS-GLI-00000-000-t1c.nii.gz   (T1 contrast → mapped to t1ce)
+      BraTS-GLI-00000-000-t2w.nii.gz   (T2 weighted → mapped to t2)
+      BraTS-GLI-00000-000-t2f.nii.gz   (T2-FLAIR   → mapped to flair)
+      BraTS-GLI-00000-000-seg.nii.gz
 
 Usage
 -----
-  # Real data
+  # Real data (BraTS 2021 or 2023 — auto-detected)
   from brats_loader import BraTSDataset
-  ds = BraTSDataset('/path/to/BraTS2021_Training_Data', slice_axis=2,
-                    patch_size=128, sigma=0.08, cache=True)
+  ds = BraTSDataset('/path/to/BraTS_data', patch_size=96, sigma=0.08)
 
   # Demo mode (no files needed)
   from brats_loader import make_demo_brats
@@ -38,6 +44,15 @@ from torch.utils.data import Dataset
 
 # ── Modality file-name suffixes ────────────────────────────────────────────────
 MODALITY_KEYS = ['t1', 't1ce', 't2', 'flair']
+
+# BraTS 2023 uses different suffix names (hyphens, new abbreviations)
+# Mapping: our internal key → list of BraTS-2023 suffix variants
+_BRATS2023_SUFFIX = {
+    't1':    ['t1n'],          # native T1
+    't1ce':  ['t1c'],          # contrast-enhanced T1
+    't2':    ['t2w'],          # T2 weighted
+    'flair': ['t2f'],          # T2-FLAIR
+}
 
 
 def _load_nii(path: str) -> np.ndarray:
@@ -77,32 +92,133 @@ def _find_subjects(root_dir: str):
     return subjects
 
 
+def find_brats_root(download_path: str) -> str:
+    """
+    Given the raw path returned by kagglehub.dataset_download(), find the
+    actual directory that contains BraTS subject sub-folders.
+
+    kagglehub sometimes nests the data one or two levels deep, e.g.:
+      /root/.cache/kagglehub/datasets/.../versions/1/
+        BraTS2023_GLI_Training/
+          BraTS-GLI-00000-000/
+            BraTS-GLI-00000-000-t1n.nii.gz ...
+
+    This function walks down until it finds a directory whose immediate
+    children are all subject directories (contain NIfTI files inside them).
+    Returns the path to that directory.
+    """
+    def _is_subject_dir(d):
+        """True if d contains at least one NIfTI file directly."""
+        try:
+            return any(
+                f.endswith('.nii.gz') or f.endswith('.nii')
+                for f in os.listdir(d)
+            )
+        except (PermissionError, NotADirectoryError):
+            return False
+
+    def _count_subject_children(d):
+        """Count immediate sub-dirs of d that look like BraTS subject dirs."""
+        try:
+            return sum(
+                1 for item in os.listdir(d)
+                if os.path.isdir(os.path.join(d, item))
+                and _is_subject_dir(os.path.join(d, item))
+            )
+        except (PermissionError, NotADirectoryError):
+            return 0
+
+    # BFS: walk directory tree, return first dir with ≥5 subject children
+    from collections import deque
+    queue = deque([download_path])
+    best = (0, download_path)
+    visited = set()
+
+    while queue:
+        current = queue.popleft()
+        if current in visited:
+            continue
+        visited.add(current)
+
+        n = _count_subject_children(current)
+        if n > best[0]:
+            best = (n, current)
+        if n >= 5:
+            break   # found a plausible root
+
+        # Descend one level
+        try:
+            for item in sorted(os.listdir(current)):
+                child = os.path.join(current, item)
+                if os.path.isdir(child) and child not in visited:
+                    queue.append(child)
+        except PermissionError:
+            pass
+
+    return best[1]
+
+
 def _build_subject_paths(subject_dir: str):
     """
     Returns dict {modality: path} for all 4 MRI modalities.
-    Tries multiple naming conventions (BraTS 2021 and 2023).
+    Auto-detects BraTS 2021 (underscore, _t1/_t1ce/_t2/_flair)
+    and BraTS 2023 (hyphen, -t1n/-t1c/-t2w/-t2f) naming conventions.
     """
     name = os.path.basename(subject_dir)
     paths = {}
     for mod in MODALITY_KEYS:
+        # BraTS 2023 alternate suffix names for this modality
+        alt_suffixes = _BRATS2023_SUFFIX.get(mod, [])
+
         candidates = [
+            # ── BraTS 2021 style (underscore separator) ──
             os.path.join(subject_dir, f'{name}_{mod}.nii.gz'),
             os.path.join(subject_dir, f'{name}_{mod}.nii'),
             os.path.join(subject_dir, f'{mod}.nii.gz'),
             os.path.join(subject_dir, f'{mod}.nii'),
         ]
+        # ── BraTS 2023 style (hyphen separator, different suffix) ──
+        for alt in alt_suffixes:
+            candidates += [
+                os.path.join(subject_dir, f'{name}-{alt}.nii.gz'),
+                os.path.join(subject_dir, f'{name}-{alt}.nii'),
+                os.path.join(subject_dir, f'{alt}.nii.gz'),
+                os.path.join(subject_dir, f'{alt}.nii'),
+            ]
+
         for c in candidates:
             if os.path.exists(c):
                 paths[mod] = c
                 break
-    # segmentation (optional)
-    for seg_name in [f'{name}_seg.nii.gz', f'{name}_seg.nii',
-                     'seg.nii.gz', 'seg.nii']:
+
+    # segmentation (optional) — try both 2021 and 2023 naming
+    for seg_name in [
+        f'{name}_seg.nii.gz', f'{name}_seg.nii',   # BraTS 2021
+        f'{name}-seg.nii.gz', f'{name}-seg.nii',   # BraTS 2023
+        'seg.nii.gz', 'seg.nii',
+    ]:
         seg_path = os.path.join(subject_dir, seg_name)
         if os.path.exists(seg_path):
             paths['seg'] = seg_path
             break
     return paths
+
+
+def detect_brats_version(root_dir: str) -> str:
+    """
+    Inspect the first subject directory and return '2021', '2023', or 'unknown'.
+    Useful for debugging data loading issues.
+    """
+    subjects = _find_subjects(root_dir)
+    if not subjects:
+        return 'unknown'
+    name = os.path.basename(subjects[0])
+    files = os.listdir(subjects[0])
+    if any(f.endswith('-t1n.nii.gz') or f.endswith('-t1c.nii.gz') for f in files):
+        return '2023'
+    if any(f.endswith('_t1.nii.gz') or f.endswith('_t1ce.nii.gz') for f in files):
+        return '2021'
+    return 'unknown'
 
 
 # ── Main Dataset ──────────────────────────────────────────────────────────────
