@@ -7,7 +7,8 @@ architecture-matched baselines:
 
   Round 1 — CNN Family      (Option 1 vs DnCNN / UNet-L1 / Noise2Noise / REDNet)
   Round 2 — ViT/MAE Family  (Option 2 2D vs VanillaMAE / SparK-CNN)
-  Round 3 — Multi-task      (Option 3 vs MultiTaskUNet / TransUNet-lite)
+  Round 3 — Multi-task      (Option 3 vs MultiTaskUNet / TransUNet-lite /
+                              UNETR-lite / SwinUNETR-lite / SeqPipeline)
   Round 4 — Swin Family     (Option 4 vs SwinIR-lite / Uformer-lite)
 
 Final head-to-head: the best PP-MAE from each round compared directly.
@@ -73,6 +74,10 @@ from option_baselines import (
     TransUNetLite, TransUNetTrainer,
     SwinIRLite, SwinIRTrainer,
     UformerLite, UformerTrainer,
+    # Existing published works for Round 3
+    UNETRLite, UNETRLiteTrainer,
+    SwinUNETRLite, SwinUNETRLiteTrainer,
+    SeqPipeline, SeqPipelineTrainer,
 )
 
 # ── Shared utilities ──────────────────────────────────────────────────────────
@@ -445,6 +450,22 @@ if 3 in ROUNDS:
             'model': TransUNetLite(in_ch=4),
             'trainer_fn': lambda m: TransUNetTrainer(m, device=DEVICE, lr=1e-4),
             'infer_fn': lambda m, noisy, seg: m(noisy),
+        },
+        # ── Existing published works ──────────────────────────────────────────
+        'UNETR-lite': {
+            'model': UNETRLite(in_ch=4, img_size=PATCH_SIZE),
+            'trainer_fn': lambda m: UNETRLiteTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy)['denoised'],
+        },
+        'SwinUNETR-lite': {
+            'model': SwinUNETRLite(in_ch=4),
+            'trainer_fn': lambda m: SwinUNETRLiteTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy)['denoised'],
+        },
+        'SeqPipeline': {
+            'model': SeqPipeline(in_ch=4),
+            'trainer_fn': lambda m: SeqPipelineTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m.denoiser(noisy),
         },
     }
     r3_results, r3_hist = train_and_eval(

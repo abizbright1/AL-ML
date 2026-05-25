@@ -1391,6 +1391,492 @@ class UformerTrainer:
 
 
 # =============================================================================
+# D.  EXISTING PUBLISHED WORK BASELINES  (Option 3 comparison)
+# =============================================================================
+#
+# Three published architectures rephrased as 2D slice pipelines to give a
+# fair "does PP-MAE beat prior art?" comparison for the pipeline round.
+#
+#   1. UNETRLite      —  UNETR (Hatamizadeh et al., WACV 2022)
+#                        ViT encoder + CNN decoder; joint L1 + CE
+#   2. SwinUNETRLite  —  SwinUNETR (Hatamizadeh et al., CVPR 2022)
+#                        Swin encoder + U-Net decoder; joint L1 + CE
+#   3. SeqPipeline    —  Standard clinical workflow: DnCNN first then a
+#                        separately-trained segmentor; no joint training,
+#                        no pathology loss, no feedback loop
+#
+# ALL use standard L1 + equal-weight CrossEntropy — the ONLY difference
+# from PP-MAE Pipeline is the missing PathologyLoss.
+# =============================================================================
+
+
+# ---------------------------------------------------------------------------
+# 1.  UNETRLite  (UNETR, Hatamizadeh et al., WACV 2022)
+# ---------------------------------------------------------------------------
+
+class UNETRLite(nn.Module):
+    """
+    Lightweight 2D adaptation of UNETR (WACV 2022).
+
+    UNETR uses a pure ViT encoder (no CNN inductive bias) and routes skip
+    connections from intermediate transformer layers into a CNN decoder.
+    For 2D slices we use a 4-layer ViT and 4-level CNN decoder.
+
+    Key difference from PP-MAE Pipeline:
+      - Same ViT + CNN structure but trained with plain L1 + CrossEntropy
+      - No PathologyLoss, no saliency masking, no cross-modal loss
+      - Represents "ViT architecture, standard loss" ablation
+    """
+
+    def __init__(
+        self,
+        in_ch:      int = 4,
+        img_size:   int = 96,
+        patch_size: int = 16,
+        embed_dim:  int = 192,
+        n_heads:    int = 4,
+        n_layers:   int = 4,
+        base_ch:    int = 32,
+    ):
+        super().__init__()
+        assert img_size % patch_size == 0
+        self.patch_size = patch_size
+        self.n_grid     = img_size // patch_size   # number of patches per dim
+        n_patches       = self.n_grid ** 2
+
+        # Patch embedding
+        self.patch_embed = nn.Conv2d(in_ch, embed_dim, patch_size, stride=patch_size)
+        self.pos_embed   = nn.Parameter(torch.zeros(1, n_patches, embed_dim))
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+
+        # ViT body — 4 transformer layers; save outputs at layers 1,2,3,4
+        self.layers = nn.ModuleList([
+            nn.TransformerEncoderLayer(
+                d_model=embed_dim, nhead=n_heads,
+                dim_feedforward=embed_dim * 4,
+                batch_first=True, norm_first=True,
+            )
+            for _ in range(n_layers)
+        ])
+
+        G = self.n_grid
+        # UNETR-style skip projectors: reshape token → spatial feature map
+        self.skip_proj = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(embed_dim, base_ch * (2 ** i)),
+                nn.GELU(),
+            )
+            for i in range(n_layers)
+        ])
+
+        # CNN decoder  (4 levels, upsampling × patch_size total)
+        #   level 0: (B, base_ch*1,  G,  G)  → (B, 32, G, G)
+        #   level 1: (B, base_ch*2,  G,  G)  with skip from layer 0
+        #   level 2: (B, base_ch*4,  G,  G)  ...
+        #   level 3: (B, base_ch*8,  G,  G)
+        # then upsample to full image
+        ch = [base_ch * (2 ** i) for i in range(n_layers)]  # [32,64,128,256]
+        self.dec_ups   = nn.ModuleList()
+        self.dec_convs = nn.ModuleList()
+        for i in range(n_layers - 1, 0, -1):
+            # merge current level + skip from previous
+            merge_ch = ch[i] + ch[i - 1]
+            self.dec_ups.append(nn.Identity())          # no spatial upsampling inside ViT stage
+            self.dec_convs.append(nn.Sequential(
+                nn.Conv2d(merge_ch, ch[i - 1], 3, padding=1),
+                nn.InstanceNorm2d(ch[i - 1]), nn.GELU(),
+            ))
+
+        # Final upsample to image resolution
+        up_factor = patch_size
+        layers_list: List[nn.Module] = []
+        c = ch[0]
+        while up_factor > 1:
+            layers_list += [
+                nn.ConvTranspose2d(c, c // 2, 2, stride=2),
+                nn.GELU(),
+            ]
+            c = c // 2
+            up_factor //= 2
+        self.final_up = nn.Sequential(*layers_list)
+
+        self.denoiser_head = nn.Conv2d(c, in_ch, 1)
+        self.seg_head      = nn.Conv2d(c, 4,     1)
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        B, C, H, W = x.shape
+        G = self.n_grid
+
+        # Patch embed → tokens
+        tokens = self.patch_embed(x)                 # (B, embed_dim, G, G)
+        tokens = tokens.flatten(2).permute(0, 2, 1)  # (B, G², embed_dim)
+        tokens = tokens + self.pos_embed
+
+        # Run transformer layers, collect intermediate features
+        skip_maps = []
+        for i, layer in enumerate(self.layers):
+            tokens = layer(tokens)
+            # Project and reshape to spatial map
+            feat = self.skip_proj[i](tokens)          # (B, G², ch[i])
+            ch_i = feat.shape[-1]
+            feat = feat.permute(0, 2, 1).reshape(B, ch_i, G, G)
+            skip_maps.append(feat)
+
+        # Decode by merging skip connections top-down
+        x_dec = skip_maps[-1]
+        for i, (up, conv) in enumerate(zip(self.dec_ups, self.dec_convs)):
+            skip = skip_maps[-(i + 2)]
+            x_dec = torch.cat([x_dec, skip], dim=1)
+            x_dec = conv(x_dec)
+
+        x_dec = self.final_up(x_dec)   # (B, small_ch, H, W)
+        return {
+            'denoised':   self.denoiser_head(x_dec),
+            'seg_logits': self.seg_head(x_dec),
+        }
+
+
+class UNETRLiteTrainer:
+    """
+    Trainer for UNETRLite.
+    Loss = L1(denoised, target) + 0.5 * CrossEntropy(seg, seg_gt)
+    Standard multi-task loss — no PathologyLoss.
+    """
+
+    def __init__(
+        self,
+        model:  UNETRLite,
+        device: str   = 'cuda',
+        lr:     float = 1e-4,
+    ):
+        self.model    = model.to(device)
+        self.device   = device
+        self.optim    = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+        self.seg_loss = nn.CrossEntropyLoss()
+
+    def step(self, batch: Dict) -> Dict[str, float]:
+        self.model.train()
+        noisy  = batch['noisy'].to(self.device)
+        target = batch['target'].to(self.device)
+        seg_gt = batch['seg'][:, 0].long().to(self.device)
+
+        self.optim.zero_grad()
+        out    = self.model(noisy)
+        l_den  = F.l1_loss(out['denoised'], target)
+        l_seg  = self.seg_loss(out['seg_logits'], seg_gt)
+        loss   = l_den + 0.5 * l_seg
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.optim.step()
+        return {'total': loss.item(), 'den': l_den.item(), 'seg': l_seg.item()}
+
+    @torch.no_grad()
+    def predict(self, noisy: torch.Tensor) -> torch.Tensor:
+        self.model.eval()
+        return self.model(noisy.to(self.device))['denoised'].cpu()
+
+
+# ---------------------------------------------------------------------------
+# 2.  SwinUNETRLite  (SwinUNETR, Hatamizadeh et al., CVPR 2022)
+# ---------------------------------------------------------------------------
+
+class SwinUNETRLite(nn.Module):
+    """
+    Lightweight 2D adaptation of SwinUNETR (CVPR 2022).
+
+    SwinUNETR is the gold-standard transformer baseline for BraTS segmentation
+    (winner/near-winner of several BraTS challenges).  It uses a Swin Transformer
+    encoder with hierarchical windows and a CNN U-Net decoder with skip
+    connections.
+
+    This lite 2D version mirrors the SwinUNETR design at reduced scale for
+    our 2D slice experiments:
+      - 3 Swin encoder stages (no downsampling inside ViT, patch merging between)
+      - Symmetric CNN decoder with skip connections
+      - Joint L1 denoising + CrossEntropy segmentation head
+
+    Key difference from PP-MAE Swin (Option 4) + Pipeline:
+      - No PathologyLoss, no saliency reweighting, no cross-modal attention
+      - Represents "SwinUNETR architecture, standard loss"
+    """
+
+    def __init__(
+        self,
+        in_ch:       int = 4,
+        base_ch:     int = 48,
+        window_size: int = 7,
+    ):
+        super().__init__()
+
+        # Stem: CNN projection to base_ch feature map
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_ch, base_ch, 3, padding=1),
+            nn.InstanceNorm2d(base_ch), nn.GELU(),
+        )
+
+        # Encoder stages: Swin blocks + patch-merging downsampling
+        # Stage 0: base_ch  → base_ch       (no downsample, skip here)
+        # Stage 1: base_ch  → base_ch*2     (downsample ×2)
+        # Stage 2: base_ch*2→ base_ch*4     (downsample ×2)
+        dims = [base_ch, base_ch * 2, base_ch * 4]
+        self.enc0 = nn.Sequential(
+            _WindowAttnBlock(dims[0], max(1, dims[0] // 16), window_size),
+            _WindowAttnBlock(dims[0], max(1, dims[0] // 16), window_size),
+        )
+        self.down01 = nn.Sequential(
+            nn.Conv2d(dims[0], dims[1], 2, stride=2),
+            nn.InstanceNorm2d(dims[1]), nn.GELU(),
+        )
+        self.enc1 = nn.Sequential(
+            _WindowAttnBlock(dims[1], max(1, dims[1] // 16), window_size),
+            _WindowAttnBlock(dims[1], max(1, dims[1] // 16), window_size),
+        )
+        self.down12 = nn.Sequential(
+            nn.Conv2d(dims[1], dims[2], 2, stride=2),
+            nn.InstanceNorm2d(dims[2]), nn.GELU(),
+        )
+        self.enc2 = nn.Sequential(
+            _WindowAttnBlock(dims[2], max(1, dims[2] // 16), window_size),
+            _WindowAttnBlock(dims[2], max(1, dims[2] // 16), window_size),
+        )
+
+        # Decoder with skip connections (SwinUNETR style)
+        # Note: Conv2d merges → (B,C,H,W); _WindowAttnBlock takes (B,H,W,C).
+        # We store them separately and apply them with explicit format swaps in forward().
+        self.up21      = nn.ConvTranspose2d(dims[2], dims[1], 2, stride=2)
+        self.dec1_conv = nn.Sequential(
+            nn.Conv2d(dims[1] * 2, dims[1], 3, padding=1),
+            nn.InstanceNorm2d(dims[1]), nn.GELU(),
+        )
+        self.dec1_attn = _WindowAttnBlock(dims[1], max(1, dims[1] // 16), window_size)
+
+        self.up10      = nn.ConvTranspose2d(dims[1], dims[0], 2, stride=2)
+        self.dec0_conv = nn.Sequential(
+            nn.Conv2d(dims[0] * 2, dims[0], 3, padding=1),
+            nn.InstanceNorm2d(dims[0]), nn.GELU(),
+        )
+        self.dec0_attn = _WindowAttnBlock(dims[0], max(1, dims[0] // 16), window_size)
+
+        self.denoiser_head = nn.Conv2d(dims[0], in_ch, 1)
+        self.seg_head      = nn.Conv2d(dims[0], 4, 1)
+
+    @staticmethod
+    def _to_sp(x: torch.Tensor) -> torch.Tensor:
+        """(B, C, H, W) → (B, H, W, C)."""
+        return x.permute(0, 2, 3, 1).contiguous()
+
+    @staticmethod
+    def _fr_sp(x: torch.Tensor) -> torch.Tensor:
+        """(B, H, W, C) → (B, C, H, W)."""
+        return x.permute(0, 3, 1, 2).contiguous()
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        s0 = self.stem(x)                                        # (B, d0, H, W)
+
+        # Encoder — convert to spatial format for window attention
+        e0 = self._fr_sp(self.enc0(self._to_sp(s0)))            # (B, d0, H, W)
+        e1 = self._fr_sp(self.enc1(self._to_sp(self.down01(e0))))
+        e2 = self._fr_sp(self.enc2(self._to_sp(self.down12(e1))))
+
+        # Decoder — Conv2d merge then window attention with explicit format swap
+        d1 = self.dec1_conv(torch.cat([self.up21(e2), e1], dim=1))  # (B, d1, H/2, W/2)
+        d1 = self._fr_sp(self.dec1_attn(self._to_sp(d1)))
+
+        d0 = self.dec0_conv(torch.cat([self.up10(d1), e0], dim=1))  # (B, d0, H, W)
+        d0 = self._fr_sp(self.dec0_attn(self._to_sp(d0)))
+
+        return {
+            'denoised':   self.denoiser_head(d0),
+            'seg_logits': self.seg_head(d0),
+        }
+
+
+class SwinUNETRLiteTrainer:
+    """
+    Trainer for SwinUNETRLite.
+    Loss = L1(denoised, target) + 0.5 * CrossEntropy(seg, seg_gt)
+    Standard multi-task loss — no PathologyLoss.
+    """
+
+    def __init__(
+        self,
+        model:  SwinUNETRLite,
+        device: str   = 'cuda',
+        lr:     float = 1e-4,
+    ):
+        self.model    = model.to(device)
+        self.device   = device
+        self.optim    = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+        self.seg_loss = nn.CrossEntropyLoss()
+
+    def step(self, batch: Dict) -> Dict[str, float]:
+        self.model.train()
+        noisy  = batch['noisy'].to(self.device)
+        target = batch['target'].to(self.device)
+        seg_gt = batch['seg'][:, 0].long().to(self.device)
+
+        self.optim.zero_grad()
+        out    = self.model(noisy)
+        l_den  = F.l1_loss(out['denoised'], target)
+        l_seg  = self.seg_loss(out['seg_logits'], seg_gt)
+        loss   = l_den + 0.5 * l_seg
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.optim.step()
+        return {'total': loss.item(), 'den': l_den.item(), 'seg': l_seg.item()}
+
+    @torch.no_grad()
+    def predict(self, noisy: torch.Tensor) -> torch.Tensor:
+        self.model.eval()
+        return self.model(noisy.to(self.device))['denoised'].cpu()
+
+
+# ---------------------------------------------------------------------------
+# 3.  SeqPipeline  (Standard clinical workflow — sequential, no joint training)
+# ---------------------------------------------------------------------------
+
+class _SeqDnCNN(nn.Module):
+    """DnCNN-style denoiser used inside SeqPipeline."""
+
+    def __init__(self, in_ch: int = 4, n_layers: int = 15, ch: int = 64):
+        super().__init__()
+        layers: List[nn.Module] = [nn.Conv2d(in_ch, ch, 3, padding=1), nn.ReLU(inplace=True)]
+        for _ in range(n_layers - 2):
+            layers += [nn.Conv2d(ch, ch, 3, padding=1),
+                       nn.BatchNorm2d(ch), nn.ReLU(inplace=True)]
+        layers.append(nn.Conv2d(ch, in_ch, 3, padding=1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x - self.net(x)   # residual denoising
+
+
+class _SeqSegNet(nn.Module):
+    """Small U-Net segmentor used inside SeqPipeline."""
+
+    def __init__(self, in_ch: int = 4, base: int = 32):
+        super().__init__()
+        def _cb(i, o): return nn.Sequential(
+            nn.Conv2d(i, o, 3, padding=1), nn.InstanceNorm2d(o), nn.GELU(),
+            nn.Conv2d(o, o, 3, padding=1), nn.InstanceNorm2d(o), nn.GELU(),
+        )
+        self.e1 = _cb(in_ch, base)
+        self.e2 = _cb(base,  base * 2)
+        self.e3 = _cb(base * 2, base * 4)
+        self.pool = nn.MaxPool2d(2)
+        self.up2  = nn.ConvTranspose2d(base * 4, base * 2, 2, stride=2)
+        self.d2   = _cb(base * 4, base * 2)
+        self.up1  = nn.ConvTranspose2d(base * 2, base, 2, stride=2)
+        self.d1   = _cb(base * 2, base)
+        self.head = nn.Conv2d(base, 4, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        s1 = self.e1(x)
+        s2 = self.e2(self.pool(s1))
+        b  = self.e3(self.pool(s2))
+        d2 = self.d2(torch.cat([self.up2(b), s2], dim=1))
+        d1 = self.d1(torch.cat([self.up1(d2), s1], dim=1))
+        return self.head(d1)
+
+
+class SeqPipeline(nn.Module):
+    """
+    Sequential Pipeline — standard clinical workflow (no joint training).
+
+    Represents the naive approach used in practice before end-to-end learning:
+      1. Train a DnCNN denoiser independently (L1 loss only)
+      2. Take its output, train a segmentor independently (CrossEntropy only)
+      3. At inference: denoised = denoiser(noisy), seg = segmentor(denoised)
+
+    Key differences from PP-MAE Pipeline:
+      • No joint gradient flow — denoiser never sees segmentation signal
+      • No PathologyLoss — denoiser optimises pixel fidelity only
+      • No saliency masking — treats all regions equally
+      • No cross-modal consistency loss
+
+    This is the 'decoupled baseline' that answers:
+      'Is joint training + pathology loss necessary, or is sequential good enough?'
+    """
+
+    def __init__(self, in_ch: int = 4):
+        super().__init__()
+        self.denoiser   = _SeqDnCNN(in_ch)
+        self.segmentor  = _SeqSegNet(in_ch)
+
+    def forward_denoise(self, noisy: torch.Tensor) -> torch.Tensor:
+        return self.denoiser(noisy)
+
+    def forward_seg(self, clean: torch.Tensor) -> torch.Tensor:
+        return self.segmentor(clean)
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        denoised   = self.denoiser(x)
+        seg_logits = self.segmentor(denoised.detach())   # DETACHED — no joint gradient
+        return {'denoised': denoised, 'seg_logits': seg_logits}
+
+
+class SeqPipelineTrainer:
+    """
+    Trainer for SeqPipeline.
+
+    Phase 1 (denoiser only): L1 loss, segmentor frozen.
+    Phase 2 (segmentor only): CrossEntropy loss, denoiser frozen.
+
+    In practice we interleave them: odd batches → denoiser step,
+    even batches → segmentor step.  This matches the 'train separately'
+    paradigm from the clinical literature.
+    """
+
+    def __init__(
+        self,
+        model:  SeqPipeline,
+        device: str   = 'cuda',
+        lr:     float = 1e-4,
+    ):
+        self.model    = model.to(device)
+        self.device   = device
+        self.optim_d  = torch.optim.AdamW(
+            model.denoiser.parameters(),  lr=lr, weight_decay=1e-5)
+        self.optim_s  = torch.optim.AdamW(
+            model.segmentor.parameters(), lr=lr, weight_decay=1e-5)
+        self.seg_loss = nn.CrossEntropyLoss()
+        self._step_counter = 0
+
+    def step(self, batch: Dict) -> Dict[str, float]:
+        self.model.train()
+        noisy  = batch['noisy'].to(self.device)
+        target = batch['target'].to(self.device)
+        seg_gt = batch['seg'][:, 0].long().to(self.device)
+
+        self._step_counter += 1
+        if self._step_counter % 2 == 1:
+            # ---- Denoiser step (segmentor frozen) ----
+            self.optim_d.zero_grad()
+            denoised = self.model.denoiser(noisy)
+            loss     = F.l1_loss(denoised, target)
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.model.denoiser.parameters(), 1.0)
+            self.optim_d.step()
+            return {'total': loss.item(), 'den': loss.item(), 'seg': 0.0}
+        else:
+            # ---- Segmentor step (denoiser frozen) ----
+            self.optim_s.zero_grad()
+            with torch.no_grad():
+                denoised = self.model.denoiser(noisy)
+            seg_logits = self.model.segmentor(denoised)
+            loss       = self.seg_loss(seg_logits, seg_gt)
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.model.segmentor.parameters(), 1.0)
+            self.optim_s.step()
+            return {'total': loss.item(), 'den': 0.0, 'seg': loss.item()}
+
+    @torch.no_grad()
+    def predict(self, noisy: torch.Tensor) -> torch.Tensor:
+        self.model.eval()
+        return self.model.denoiser(noisy.to(self.device)).cpu()
+
+
+# =============================================================================
 # Quick sanity check
 # =============================================================================
 
