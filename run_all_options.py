@@ -2,7 +2,7 @@
 run_all_options.py — Unified runner comparing all 4 PP-MAE options vs baselines
 =================================================================================
 
-Runs 4 rounds of experiments, each comparing one PP-MAE option against
+Runs 5 rounds of experiments, each comparing one PP-MAE option against
 architecture-matched baselines:
 
   Round 1 — CNN Family      (Option 1 vs DnCNN / UNet-L1 / Noise2Noise / REDNet)
@@ -10,6 +10,8 @@ architecture-matched baselines:
   Round 3 — Multi-task      (Option 3 vs MultiTaskUNet / TransUNet-lite /
                               UNETR-lite / SwinUNETR-lite / SeqPipeline)
   Round 4 — Swin Family     (Option 4 vs SwinIR-lite / Uformer-lite)
+  Round 5 — SOTA 2021-2026  (Option 3 vs nnU-Net / TransBTS / MedSegDiff /
+                              SwinUNETR-v2 / MedSAM / MedNeXt)
 
 Final head-to-head: the best PP-MAE from each round compared directly.
 
@@ -24,7 +26,7 @@ CLI usage
   # Full options:
   python3 run_all_options.py [brats_root] \\
       --epochs 20 --seg_epochs 20 --patch_size 96 --sigma 0.08 \\
-      --out /path/to/output --max_subjects 20 --rounds 1,2,3,4
+      --out /path/to/output --max_subjects 20 --rounds 1,2,3,4,5
 
 Output files
 ------------
@@ -32,6 +34,7 @@ Output files
   options_round2.png   — ViT/MAE family PSNR + Dice ET
   options_round3.png   — Multi-task family PSNR + Dice ET
   options_round4.png   — Swin family PSNR + Dice ET
+  options_round5.png   — SOTA 2021-2026 family PSNR + Dice ET
   options_headtohead.png — All 4 PP-MAE options, 6-metric comparison
   options_table.png    — Full results table across all methods and rounds
   options_results.csv  — Numeric results
@@ -79,6 +82,15 @@ from option_baselines import (
     SwinUNETRLite, SwinUNETRLiteTrainer,
     SeqPipeline, SeqPipelineTrainer,
 )
+from sota_baselines import (
+    # Round 5 — SOTA 2021-2026
+    nnUNetLite, nnUNetLiteTrainer,
+    TransBTSLite, TransBTSTrainer,
+    MedSegDiffLite, MedSegDiffTrainer,
+    SwinUNETRv2Lite, SwinUNETRv2Trainer,
+    MedSAMLite, MedSAMTrainer,
+    MedNeXtLite, MedNeXtTrainer,
+)
 
 # ── Shared utilities ──────────────────────────────────────────────────────────
 from segmentor import UNetSegmentor, SegTrainer, seg_metrics
@@ -104,8 +116,8 @@ _parser.add_argument('--out',          type=str,   default=None,
                      help='Output directory for plots and CSV')
 _parser.add_argument('--max_subjects', type=int,   default=None,
                      help='Limit number of BraTS subjects (None = all; demo uses 6)')
-_parser.add_argument('--rounds',       type=str,   default='1,2,3,4',
-                     help='Comma-separated list of rounds to run (e.g. "1,3")')
+_parser.add_argument('--rounds',       type=str,   default='1,2,3,4,5',
+                     help='Comma-separated list of rounds to run (e.g. "1,3,5")')
 _args = _parser.parse_args()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -475,6 +487,78 @@ if 3 in ROUNDS:
     all_results['Round 3 — Multi-task'] = r3_results
     all_histories['Round 3 — Multi-task'] = r3_hist
 
+# ── Round 5: SOTA 2021-2026 ──────────────────────────────────────────────────
+if 5 in ROUNDS:
+    _r5_pipeline = PPMAEPipeline({'in_channels': 4, 'base_ch': 32, 'depth': 3})
+
+    r5_cfg = {
+        # PP-MAE Option 3 is the proposed method
+        'PP-MAE Pipeline': {
+            'model': _r5_pipeline,
+            'trainer_fn': lambda m: PipelineTrainer(m, device=DEVICE),
+            'infer_fn': lambda m, noisy, seg: m.denoiser(noisy, seg),
+        },
+        # ── SOTA 2021-2026 baselines ──────────────────────────────────────────
+        #
+        # 1. nnU-Net (Nature Methods 2021) — gold standard residual CNN
+        #    Uses L1 only, no PathologyLoss, no saliency masking.
+        'nnU-Net-Lite': {
+            'model': nnUNetLite(in_ch=4, base_ch=32, depth=4),
+            'trainer_fn': lambda m: nnUNetLiteTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy),
+        },
+        #
+        # 2. TransBTS (MICCAI 2021) — CNN encoder + Transformer bottleneck
+        #    Joint L1 + CE loss, no PathologyLoss, no saliency masking.
+        'TransBTS-Lite': {
+            'model': TransBTSLite(in_ch=4, base_ch=32, depth=3,
+                                  n_heads=4, n_transformer=4, embed_dim=128),
+            'trainer_fn': lambda m: TransBTSTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy)['denoised'],
+        },
+        #
+        # 3. MedSegDiff (AAAI 2024) — diffusion model for medical imaging
+        #    DDPM noise prediction, uniform noise schedule, no PathologyLoss.
+        'MedSegDiff-Lite': {
+            'model': MedSegDiffLite(in_ch=4, base_ch=24, depth=3),
+            'trainer_fn': lambda m: MedSegDiffTrainer(m, device=DEVICE, lr=2e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy),
+        },
+        #
+        # 4. SwinUNETR-v2 (MICCAI 2023) — enhanced Swin + contrastive pretraining
+        #    Cosine attention bias + rotation-invariant SSL, no PathologyLoss.
+        'SwinUNETR-v2-Lite': {
+            'model': SwinUNETRv2Lite(in_ch=4, embed_dim=48, depth=3,
+                                     n_heads=3, window_size=4),
+            'trainer_fn': lambda m: SwinUNETRv2Trainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy),
+        },
+        #
+        # 5. MedSAM (Nature Comm. 2024) — SAM-inspired prompt encoder + decoder
+        #    Two-way cross-attention, prompt-driven, no PathologyLoss.
+        'MedSAM-Lite': {
+            'model': MedSAMLite(in_ch=4, embed_dim=96, depth=4,
+                                n_heads=4, patch_size=8 if PATCH_SIZE >= 64 else 4),
+            'trainer_fn': lambda m: MedSAMTrainer(m, device=DEVICE, lr=5e-5),
+            'infer_fn': lambda m, noisy, seg: m(noisy, seg),
+        },
+        #
+        # 6. MedNeXt (MICCAI 2023) — ConvNeXt with large-kernel depthwise conv
+        #    7×7 depthwise conv, Dice+CE loss, no PathologyLoss.
+        'MedNeXt-Lite': {
+            'model': MedNeXtLite(in_ch=4, base_ch=32, depth=4,
+                                 kernel_size=7, n_blocks_per_stage=2),
+            'trainer_fn': lambda m: MedNeXtTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy)['denoised'],
+        },
+    }
+    r5_results, r5_hist = train_and_eval(
+        'Round 5 — SOTA 2021-2026 (Option 3 vs Published SOTA)',
+        r5_cfg, train_loader, val_loader, seg_model, D_EPOCHS, DEVICE,
+    )
+    all_results['Round 5 — SOTA'] = r5_results
+    all_histories['Round 5 — SOTA'] = r5_hist
+
 # ── Round 4: Swin Family ──────────────────────────────────────────────────────
 if 4 in ROUNDS:
     r4_cfg = {
@@ -514,6 +598,7 @@ ROUND_LABELS = {
     'Round 2 — ViT/MAE':    ('ROUND 2', 'ViT PP-MAE 2D'),
     'Round 3 — Multi-task': ('ROUND 3', 'PP-MAE Pipeline'),
     'Round 4 — Swin':       ('ROUND 4', 'Swin PP-MAE'),
+    'Round 5 — SOTA':       ('ROUND 5', 'PP-MAE Pipeline'),
 }
 
 best_per_round: Dict[str, Tuple[str, Dict[str, float]]] = {}
@@ -592,6 +677,7 @@ OPTION_COLORS = {
     'Round 2 — ViT/MAE':    '#6A0DAD',   # Option 2 — purple
     'Round 3 — Multi-task': '#007C7C',   # Option 3 — teal
     'Round 4 — Swin':       '#C2185B',   # Option 4 — deep pink
+    'Round 5 — SOTA':       '#2E7D32',   # SOTA round — forest green
 }
 
 PPMAE_NAME_MAP = {
@@ -599,6 +685,7 @@ PPMAE_NAME_MAP = {
     'Round 2 — ViT/MAE':    'ViT PP-MAE 2D',
     'Round 3 — Multi-task': 'PP-MAE Pipeline',
     'Round 4 — Swin':       'Swin PP-MAE',
+    'Round 5 — SOTA':       'PP-MAE Pipeline',
 }
 
 
@@ -656,6 +743,7 @@ ROUND_FIGURE_MAP = {
     'Round 2 — ViT/MAE':    ('options_round2.png', 'Round 2 — ViT/MAE Family'),
     'Round 3 — Multi-task': ('options_round3.png', 'Round 3 — Multi-task Family'),
     'Round 4 — Swin':       ('options_round4.png', 'Round 4 — Swin Family'),
+    'Round 5 — SOTA':       ('options_round5.png', 'Round 5 — SOTA 2021-2026'),
 }
 
 for round_key, results in all_results.items():
