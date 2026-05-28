@@ -163,7 +163,8 @@ def window_partition(x: torch.Tensor, window_size: int) -> tuple[torch.Tensor, t
         x = F.pad(x, (0, 0, 0, W_pad, 0, H_pad))
     Hp, Wp = H + H_pad, W + W_pad
     x = x.reshape(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
-    return x.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(-1, window_size, window_size, C), (H, W)
+    x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+    return x.reshape(-1, window_size, window_size, C), (H, W)
 
 
 def window_reverse(windows: torch.Tensor, window_size: int, orig_hw: tuple) -> torch.Tensor:
@@ -174,7 +175,8 @@ def window_reverse(windows: torch.Tensor, window_size: int, orig_hw: tuple) -> t
     n_windows_h, n_windows_w = Hp // window_size, Wp // window_size
     B = windows.shape[0] // (n_windows_h * n_windows_w)
     x = windows.reshape(B, n_windows_h, n_windows_w, window_size, window_size, -1)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(B, Hp, Wp, -1)
+    x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+    x = x.reshape(B, Hp, Wp, -1)
     return x[:, :H_orig, :W_orig, :].contiguous()
 
 
@@ -223,18 +225,18 @@ class SwinBlock(nn.Module):
         x = self.norm1(x)
 
         if self.shift_size > 0:
-            x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
+            x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2)).contiguous()
 
         windows, orig_hw = window_partition(x, ws)   # (B*nW, ws, ws, C)
         nW = windows.shape[0]
         tokens = windows.reshape(nW, ws * ws, C)
 
         tokens, _ = self.attn(tokens, tokens, tokens)
-        windows = tokens.reshape(nW, ws, ws, C)
+        windows = tokens.reshape(nW, ws, ws, C).contiguous()
         x = window_reverse(windows, ws, orig_hw)
 
         if self.shift_size > 0:
-            x = torch.roll(x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
+            x = torch.roll(x, shifts=(self.shift_size, self.shift_size), dims=(1, 2)).contiguous()
 
         x = residual + x
         x = x + self.mlp(self.norm2(x))
@@ -344,9 +346,9 @@ class SwinDecoderStage(nn.Module):
         x:    torch.Tensor,   # (B, C, H, W)
         skip: torch.Tensor,   # (B, H*2, W*2, skip_ch)
     ) -> torch.Tensor:
-        x    = self.up(x)                     # (B, C//2, H*2, W*2)
-        x    = x.permute(0, 2, 3, 1)          # → (B, H*2, W*2, C//2)
-        x    = torch.cat([x, skip], dim=-1)   # (B, H*2, W*2, C//2+skip_ch)
+        x    = self.up(x)                                  # (B, C//2, H*2, W*2)
+        x    = x.permute(0, 2, 3, 1).contiguous()         # → (B, H*2, W*2, C//2)
+        x    = torch.cat([x, skip], dim=-1).contiguous()  # (B, H*2, W*2, C//2+skip_ch)
         x    = self.norm(self.merge(x))
         x    = self.swin(x)
         return x                              # (B, H*2, W*2, out_ch)
@@ -477,11 +479,11 @@ class SwinPPMAE(nn.Module):
         # Decoder
         dec = feat
         for dec_stage, skip in zip(self.dec_stages, reversed(skips[:-1])):
-            dec_spatial = dec.permute(0, 3, 1, 2)   # → (B, C, H, W)
+            dec_spatial = dec.permute(0, 3, 1, 2).contiguous()   # → (B, C, H, W)
             dec = dec_stage(dec_spatial, skip)
 
         # Final spatial upsampling
-        out = dec.permute(0, 3, 1, 2)               # (B, C, H//4, W//4)
+        out = dec.permute(0, 3, 1, 2).contiguous()  # (B, C, H//4, W//4)
         out = self.final_up(out)                     # (B, 4, H, W)
         return torch.sigmoid(out)
 
