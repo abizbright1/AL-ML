@@ -89,7 +89,15 @@ class _MPSMHA(nn.Module):
         k = self.k_proj(key  ).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
         v = self.v_proj(value).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
 
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        # Manual scaled dot-product attention — avoids MPS backward issues
+        # with F.scaled_dot_product_attention on Python 3.9 / older PyTorch builds
+        scale = D ** -0.5
+        attn  = torch.matmul(q, k.transpose(-2, -1)) * scale  # (B,H,S,T)
+        if attn_mask is not None:
+            attn = attn + attn_mask
+        attn  = F.softmax(attn, dim=-1)
+        out   = torch.matmul(attn, v)                          # (B,H,S,D)
+
         out = out.permute(0, 2, 1, 3).reshape(B, S, E)
         out = self.out_proj(out)
         return out, None   # mirrors nn.MultiheadAttention return signature
