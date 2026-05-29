@@ -33,6 +33,19 @@ from losses import PPMAELoss
 
 
 # ---------------------------------------------------------------------------
+# MPS-safe LayerNorm — forces .contiguous() before forward to prevent the
+# Apple MPS backward ".view() size not compatible" crash on non-contiguous
+# tensors produced by permute/roll in transformer blocks.
+# ---------------------------------------------------------------------------
+
+class _SafeLayerNorm(nn.LayerNorm):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return super().forward(x.contiguous())
+
+
+
+
+# ---------------------------------------------------------------------------
 # MPS-compatible multi-head attention (shared across all baseline models)
 # ---------------------------------------------------------------------------
 
@@ -133,9 +146,9 @@ class _ViTBlock(nn.Module):
 
     def __init__(self, dim: int, n_heads: int, mlp_ratio: float = 4.0):
         super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
+        self.norm1 = _SafeLayerNorm(dim)
         self.attn  = _MPSMHA(dim, n_heads)
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm2 = _SafeLayerNorm(dim)
         mlp_dim    = int(dim * mlp_ratio)
         self.ffn   = nn.Sequential(
             nn.Linear(dim, mlp_dim),
@@ -201,7 +214,7 @@ class VanillaMAE2D(nn.Module):
         self.encoder = nn.Sequential(*[
             _ViTBlock(embed, n_heads) for _ in range(depth)
         ])
-        self.enc_norm = nn.LayerNorm(embed)
+        self.enc_norm = _SafeLayerNorm(embed)
 
         # Decoder
         self.mask_token   = nn.Parameter(torch.zeros(1, 1, decoder_dim))
@@ -214,7 +227,7 @@ class VanillaMAE2D(nn.Module):
             _ViTBlock(decoder_dim, max(1, decoder_dim // 32))
             for _ in range(decoder_depth)
         ])
-        self.dec_norm  = nn.LayerNorm(decoder_dim)
+        self.dec_norm  = _SafeLayerNorm(decoder_dim)
         self.pred_head = nn.Linear(decoder_dim, in_chans * patch * patch)
 
     def _random_mask(
@@ -340,7 +353,7 @@ class ViTPPMAE2D(nn.Module):
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         self.encoder  = nn.Sequential(*[_ViTBlock(embed, n_heads) for _ in range(depth)])
-        self.enc_norm = nn.LayerNorm(embed)
+        self.enc_norm = _SafeLayerNorm(embed)
 
         # Decoder
         self.mask_token    = nn.Parameter(torch.zeros(1, 1, decoder_dim))
@@ -353,7 +366,7 @@ class ViTPPMAE2D(nn.Module):
             _ViTBlock(decoder_dim, max(1, decoder_dim // 32))
             for _ in range(decoder_depth)
         ])
-        self.dec_norm  = nn.LayerNorm(decoder_dim)
+        self.dec_norm  = _SafeLayerNorm(decoder_dim)
         self.pred_head = nn.Linear(decoder_dim, in_chans * patch * patch)
 
     def _saliency_mask(
@@ -961,7 +974,7 @@ class TransUNetLite(nn.Module):
         )
 
         # ViT bottleneck
-        self.vit_norm = nn.LayerNorm(128)
+        self.vit_norm = _SafeLayerNorm(128)
         self.vit_blocks = nn.Sequential(*[
             _ViTBlock(128, n_heads) for _ in range(4)
         ])
@@ -1074,9 +1087,9 @@ class _WindowAttnBlock(nn.Module):
         super().__init__()
         self.dim         = dim
         self.window_size = window_size
-        self.norm1 = nn.LayerNorm(dim)
+        self.norm1 = _SafeLayerNorm(dim)
         self.attn  = _MPSMHA(dim, n_heads)
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm2 = _SafeLayerNorm(dim)
         self.ffn   = nn.Sequential(
             nn.Linear(dim, dim * 4),
             nn.GELU(),
@@ -1174,7 +1187,7 @@ class SwinIRLite(nn.Module):
         ])
 
         # Residual connection from stem
-        self.norm = nn.LayerNorm(dim)
+        self.norm = _SafeLayerNorm(dim)
 
         # Head: project back to in_ch
         self.head = nn.Sequential(

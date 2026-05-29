@@ -45,6 +45,19 @@ from losses import PPMAELoss
 
 
 # ---------------------------------------------------------------------------
+# MPS-safe LayerNorm — forces .contiguous() before forward to prevent the
+# Apple MPS backward ".view() size not compatible" crash on non-contiguous
+# tensors produced by permute/roll in transformer blocks.
+# ---------------------------------------------------------------------------
+
+class _SafeLayerNorm(nn.LayerNorm):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return super().forward(x.contiguous())
+
+
+
+
+# ---------------------------------------------------------------------------
 # 3D Patch Embedding
 # ---------------------------------------------------------------------------
 
@@ -154,7 +167,7 @@ class MultiHeadSelfAttention(nn.Module):
     def __init__(self, embed_dim: int, n_heads: int, dropout: float = 0.0):
         super().__init__()
         self.attn = nn.MultiheadAttention(embed_dim, n_heads, dropout=dropout, batch_first=True)
-        self.norm = nn.LayerNorm(embed_dim)
+        self.norm = _SafeLayerNorm(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.attn(self.norm(x), self.norm(x), self.norm(x))[0]
@@ -171,7 +184,7 @@ class FFN(nn.Module):
             nn.Linear(hidden, embed_dim),
             nn.Dropout(dropout),
         )
-        self.norm = nn.LayerNorm(embed_dim)
+        self.norm = _SafeLayerNorm(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.net(self.norm(x))
@@ -236,7 +249,7 @@ class ViTPPMAE(nn.Module):
         nn.init.trunc_normal_(self.mask_token, std=0.02)
 
         # Encoder
-        self.encoder_norm   = nn.LayerNorm(embed_dim)
+        self.encoder_norm   = _SafeLayerNorm(embed_dim)
         self.encoder_blocks = nn.ModuleList([
             TransformerBlock(embed_dim, n_heads, mlp_ratio) for _ in range(depth)
         ])
@@ -249,7 +262,7 @@ class ViTPPMAE(nn.Module):
         nn.init.trunc_normal_(self.decoder_pos_embed, std=0.02)
 
         # Decoder
-        self.decoder_norm   = nn.LayerNorm(decoder_dim)
+        self.decoder_norm   = _SafeLayerNorm(decoder_dim)
         self.decoder_blocks = nn.ModuleList([
             TransformerBlock(decoder_dim, max(1, decoder_dim // 64), mlp_ratio)
             for _ in range(decoder_depth)
