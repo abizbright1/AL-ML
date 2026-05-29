@@ -45,6 +45,17 @@ from losses import PPMAELoss
 
 
 # ---------------------------------------------------------------------------
+# MPS-safe LayerNorm — forces contiguous memory before every forward call.
+# PyTorch's built-in LayerNorm backward uses .view() internally, which crashes
+# on Apple MPS when the input tensor is non-contiguous (e.g. after permute/roll).
+# ---------------------------------------------------------------------------
+
+class _SafeLayerNorm(nn.LayerNorm):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return super().forward(x.contiguous())
+
+
+# ---------------------------------------------------------------------------
 # MPS-compatible multi-head attention
 # ---------------------------------------------------------------------------
 
@@ -127,8 +138,8 @@ class CrossModalAttention(nn.Module):
         self.to_qkv_b = nn.Linear(ch, ch * 3, bias=False)
         self.attn_a   = _MPSMHA(ch, n_heads)
         self.attn_b   = _MPSMHA(ch, n_heads)
-        self.norm_a   = nn.LayerNorm(ch)
-        self.norm_b   = nn.LayerNorm(ch)
+        self.norm_a   = _SafeLayerNorm(ch)
+        self.norm_b   = _SafeLayerNorm(ch)
 
     def forward(
         self,
@@ -208,9 +219,9 @@ class SwinBlock(nn.Module):
         self.window_size = window_size
         self.shift_size  = shift_size
 
-        self.norm1 = nn.LayerNorm(dim)
+        self.norm1 = _SafeLayerNorm(dim)
         self.attn  = _MPSMHA(dim, n_heads)
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm2 = _SafeLayerNorm(dim)
         hidden = int(dim * mlp_ratio)
         self.mlp   = nn.Sequential(
             nn.Linear(dim, hidden), nn.GELU(),
@@ -271,7 +282,7 @@ class SwinStage(nn.Module):
         ])
         # Patch merging: concatenate 2×2 neighbours → linear projection
         self.downsample = nn.Sequential(
-            nn.LayerNorm(dim * 4),
+            _SafeLayerNorm(dim * 4),
             nn.Linear(dim * 4, out_dim, bias=False),
         ) if out_dim != dim else nn.Identity()
         self.do_downsample = out_dim != dim
@@ -338,7 +349,7 @@ class SwinDecoderStage(nn.Module):
         super().__init__()
         self.up    = nn.ConvTranspose2d(in_ch, in_ch // 2, 2, stride=2)
         self.merge = nn.Linear(in_ch // 2 + skip_ch, out_ch)
-        self.norm  = nn.LayerNorm(out_ch)
+        self.norm  = _SafeLayerNorm(out_ch)
         self.swin  = SwinBlock(out_ch, max(1, out_ch // 32))
 
     def forward(
@@ -389,11 +400,11 @@ class SwinPPMAE(nn.Module):
         # Patch embedding  (4×4 conv, following Swin-T)
         self.patch_embed = nn.Sequential(
             nn.Conv2d(in_ch, embed_dim, 4, stride=4, bias=False),
-            nn.LayerNorm([embed_dim, 1, 1]),    # dummy to store shape; applied below
+            _SafeLayerNorm([embed_dim, 1, 1]),    # dummy to store shape; applied below
         )
         # Rewrite as proper LN over channels
         self.patch_embed = nn.Conv2d(in_ch, embed_dim, 4, stride=4, bias=False)
-        self.patch_norm  = nn.LayerNorm(embed_dim)
+        self.patch_norm  = _SafeLayerNorm(embed_dim)
 
         # Cross-modal attention (applied at patch-token level before encoder)
         self.cross_modal = nn.ModuleList([
