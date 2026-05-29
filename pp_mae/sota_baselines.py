@@ -56,6 +56,17 @@ from losses import PPMAELoss
 
 
 # ============================================================================
+# MPS-safe LayerNorm — forces .contiguous() before every forward.
+# PyTorch's LayerNorm backward uses .view() internally, crashing on Apple MPS
+# when the input is non-contiguous (after permute/roll in Swin blocks).
+# ============================================================================
+
+class _SafeLayerNorm(nn.LayerNorm):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return super().forward(x.contiguous())
+
+
+# ============================================================================
 # Shared utility: MPS-compatible multi-head attention
 # ============================================================================
 
@@ -253,9 +264,9 @@ class _TransformerBlock(nn.Module):
 
     def __init__(self, dim: int, n_heads: int, mlp_ratio: float = 4.0):
         super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
+        self.norm1 = _SafeLayerNorm(dim)
         self.attn  = _MPSMHA(dim, n_heads)
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm2 = _SafeLayerNorm(dim)
         mlp_dim    = int(dim * mlp_ratio)
         self.mlp   = nn.Sequential(
             nn.Linear(dim, mlp_dim),
@@ -672,12 +683,12 @@ class _SwinBlockV2(nn.Module):
     def __init__(self, dim: int, n_heads: int, window_size: int = 4):
         super().__init__()
         self.window_size = window_size
-        self.norm1 = nn.LayerNorm(dim)
+        self.norm1 = _SafeLayerNorm(dim)
         self.attn  = _MPSMHA(dim, n_heads)
         # Cosine-based bias (v2 upgrade over v1's additive bias)
         self.bias_logit_scale = nn.Parameter(torch.log(torch.tensor(10.0)))
         self.bias_table = nn.Embedding((2*window_size-1)**2, n_heads)
-        self.norm2  = nn.LayerNorm(dim)
+        self.norm2  = _SafeLayerNorm(dim)
         self.mlp    = nn.Sequential(
             nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim))
 
@@ -704,7 +715,7 @@ class _SwinBlockV2(nn.Module):
 
         # Partition into windows
         x_win = x.reshape(B, H//ws, ws, W//ws, ws, C)
-        x_win = x_win.permute(0, 1, 3, 2, 4, 5).reshape(-1, ws*ws, C)   # (B*nW, ws², C)
+        x_win = x_win.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(-1, ws*ws, C)   # (B*nW, ws², C)
 
         # Self-attention within windows
         n_tok = ws * ws
@@ -723,7 +734,7 @@ class _SwinBlockV2(nn.Module):
 
         # Unpartition
         x_win = x_win.reshape(B, H//ws, W//ws, ws, ws, C)
-        x     = x_win.permute(0, 1, 3, 2, 4, 5).reshape(B, H, W, C)
+        x     = x_win.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(B, H, W, C)
         return x
 
 
@@ -770,7 +781,7 @@ class SwinUNETRv2Lite(nn.Module):
         # Patch embedding: stride 4 (2 consecutive 2-stride convs)
         self.patch_embed = nn.Sequential(
             nn.Conv2d(in_ch, dims[0], 4, stride=4),
-            nn.LayerNorm([dims[0], 1, 1]),   # dummy; replaced below
+            _SafeLayerNorm([dims[0], 1, 1]),   # dummy; replaced below
         )
         # Simpler: just one conv
         self.patch_embed = nn.Sequential(
@@ -830,7 +841,7 @@ class SwinUNETRv2Lite(nn.Module):
             x_sp = x.permute(0, 2, 3, 1)          # (B, H, W, C)
             for blk in stage:
                 x_sp = blk(x_sp)
-            x = x_sp.permute(0, 3, 1, 2)          # (B, C, H, W)
+            x = x_sp.permute(0, 3, 1, 2).contiguous()  # (B, C, H, W)
             if pad_h > 0 or pad_w > 0:
                 x = x[:, :, :H, :W]               # remove padding
             skips.append(x)
@@ -852,7 +863,7 @@ class SwinUNETRv2Lite(nn.Module):
         x_sp = x.permute(0, 2, 3, 1)
         for blk in self.bottleneck_blocks:
             x_sp = blk(x_sp)
-        x = x_sp.permute(0, 3, 1, 2)
+        x = x_sp.permute(0, 3, 1, 2).contiguous()
         if pad_h > 0 or pad_w > 0:
             x = x[:, :, :H, :W]
 
@@ -951,14 +962,14 @@ class _SAMLikeDecoder(nn.Module):
         super().__init__()
         self.cross_attn_img2prompt = _MPSMHA(embed_dim, n_heads)
         self.cross_attn_prompt2img = _MPSMHA(embed_dim, n_heads)
-        self.norm1  = nn.LayerNorm(embed_dim)
-        self.norm2  = nn.LayerNorm(embed_dim)
+        self.norm1  = _SafeLayerNorm(embed_dim)
+        self.norm2  = _SafeLayerNorm(embed_dim)
         self.mlp    = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 2),
             nn.GELU(),
             nn.Linear(embed_dim * 2, embed_dim),
         )
-        self.norm3  = nn.LayerNorm(embed_dim)
+        self.norm3  = _SafeLayerNorm(embed_dim)
         self.out_up = nn.Sequential(
             nn.ConvTranspose2d(embed_dim, embed_dim // 2, 2, stride=2),
             nn.GELU(),
@@ -972,8 +983,8 @@ class _SAMLikeDecoder(nn.Module):
         prompt_tokens: (B, embed, H, W) — from prompt encoder
         """
         B, C, H, W = img_tokens.shape
-        img_flat    = img_tokens.reshape(B, C, -1).permute(0, 2, 1)    # (B, HW, C)
-        prompt_flat = prompt_tokens.reshape(B, C, -1).permute(0, 2, 1) # (B, HW, C)
+        img_flat    = img_tokens.reshape(B, C, -1).permute(0, 2, 1).contiguous()    # (B, HW, C)
+        prompt_flat = prompt_tokens.reshape(B, C, -1).permute(0, 2, 1).contiguous() # (B, HW, C)
 
         # Cross-attention: image queries, prompt keys/values
         img_attn, _ = self.cross_attn_img2prompt(
@@ -989,7 +1000,7 @@ class _SAMLikeDecoder(nn.Module):
         img_flat = img_flat + self.mlp(self.norm3(img_flat))
 
         # Reshape back and upsample to original resolution
-        img_out = img_flat.permute(0, 2, 1).reshape(B, C, H, W)
+        img_out = img_flat.permute(0, 2, 1).contiguous().reshape(B, C, H, W)
         return self.out_up(img_out)   # (B, out_ch, H*4, W*4)
 
 
