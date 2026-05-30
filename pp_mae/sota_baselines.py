@@ -62,8 +62,7 @@ from losses import PPMAELoss
 # ============================================================================
 
 class _SafeLayerNorm(nn.LayerNorm):
-    """Manual LayerNorm (elementwise ops) — avoids the MPS native_layer_norm
-    backward `.view()` crash on non-contiguous gradients."""
+    """LayerNorm via elementwise ops — avoids the fused C++ backward's .view() crash on MPS."""
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         dims = tuple(range(-len(self.normalized_shape), 0))
@@ -74,6 +73,24 @@ class _SafeLayerNorm(nn.LayerNorm):
         if self.elementwise_affine:
             x_norm = x_norm * self.weight + self.bias
         return x_norm
+
+
+class _ContiguousFunc(torch.autograd.Function):
+    """Contiguity barrier: makes tensor contiguous in both forward AND backward.
+    Needed between reshape() and permute() so that in the backward direction
+    the gradient is made contiguous before reshape's backward calls .view()."""
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor) -> torch.Tensor:
+        return x.contiguous()
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor) -> torch.Tensor:
+        return grad.contiguous()
+
+
+def _c(x: torch.Tensor) -> torch.Tensor:
+    return _ContiguousFunc.apply(x)
 
 
 # ============================================================================
@@ -113,12 +130,17 @@ class _MPSMHA(nn.Module):
         T = key.shape[1]
         H, D = self.num_heads, self.head_dim
 
-        q = self.q_proj(query).reshape(B, S, H, D).permute(0, 2, 1, 3)
-        k = self.k_proj(key  ).reshape(B, T, H, D).permute(0, 2, 1, 3)
-        v = self.v_proj(value).reshape(B, T, H, D).permute(0, 2, 1, 3)
+        q = _c(self.q_proj(query).reshape(B, S, H, D)).permute(0, 2, 1, 3)
+        k = _c(self.k_proj(key  ).reshape(B, T, H, D)).permute(0, 2, 1, 3)
+        v = _c(self.v_proj(value).reshape(B, T, H, D)).permute(0, 2, 1, 3)
 
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-        out = out.permute(0, 2, 1, 3).reshape(B, S, E)
+        scale = D ** -0.5
+        attn  = torch.matmul(q, k.transpose(-2, -1)) * scale
+        if attn_mask is not None:
+            attn = attn + attn_mask
+        attn  = F.softmax(attn, dim=-1)
+        out   = torch.matmul(attn, v)
+        out = _c(out.permute(0, 2, 1, 3)).reshape(B, S, E)
         return self.out_proj(out), None
 
 
@@ -375,9 +397,9 @@ class TransBTSLite(nn.Module):
         """Reshape CNN feature map → token sequence → transformer → reshape back."""
         B, C, H, W = x.shape
         x = self.proj_in(x)                        # (B, embed, H, W)
-        tokens = x.reshape(B, x.shape[1], -1).permute(0, 2, 1)   # (B, H*W, embed)
+        tokens = _c(x.reshape(B, x.shape[1], -1)).permute(0, 2, 1)   # (B, H*W, embed)
         tokens = self.transformer(tokens)
-        x = tokens.permute(0, 2, 1).reshape(B, x.shape[1], H, W)
+        x = _c(tokens.permute(0, 2, 1)).reshape(B, x.shape[1], H, W)
         return self.proj_out(x)                    # (B, bottleneck_ch, H, W)
 
     def forward(self, x: torch.Tensor) -> dict:
@@ -724,8 +746,8 @@ class _SwinBlockV2(nn.Module):
             f"Feature map {H}×{W} not divisible by window_size={ws}"
 
         # Partition into windows
-        x_win = x.reshape(B, H//ws, ws, W//ws, ws, C)
-        x_win = x_win.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(-1, ws*ws, C)   # (B*nW, ws², C)
+        x_win = _c(x.reshape(B, H//ws, ws, W//ws, ws, C)).permute(0, 1, 3, 2, 4, 5)
+        x_win = _c(x_win).reshape(-1, ws*ws, C)                                       # (B*nW, ws², C)
 
         # Self-attention within windows
         n_tok = ws * ws
@@ -743,8 +765,8 @@ class _SwinBlockV2(nn.Module):
         x_win = x_win + self.mlp(self.norm2(x_win))
 
         # Unpartition
-        x_win = x_win.reshape(B, H//ws, W//ws, ws, ws, C)
-        x     = x_win.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(B, H, W, C)
+        x_win = _c(x_win.reshape(B, H//ws, W//ws, ws, ws, C)).permute(0, 1, 3, 2, 4, 5)
+        x     = _c(x_win).reshape(B, H, W, C)
         return x
 
 
@@ -993,8 +1015,8 @@ class _SAMLikeDecoder(nn.Module):
         prompt_tokens: (B, embed, H, W) — from prompt encoder
         """
         B, C, H, W = img_tokens.shape
-        img_flat    = img_tokens.reshape(B, C, -1).permute(0, 2, 1).contiguous()    # (B, HW, C)
-        prompt_flat = prompt_tokens.reshape(B, C, -1).permute(0, 2, 1).contiguous() # (B, HW, C)
+        img_flat    = _c(img_tokens.reshape(B, C, -1)).permute(0, 2, 1)    # (B, HW, C)
+        prompt_flat = _c(prompt_tokens.reshape(B, C, -1)).permute(0, 2, 1) # (B, HW, C)
 
         # Cross-attention: image queries, prompt keys/values
         img_attn, _ = self.cross_attn_img2prompt(
@@ -1010,7 +1032,7 @@ class _SAMLikeDecoder(nn.Module):
         img_flat = img_flat + self.mlp(self.norm3(img_flat))
 
         # Reshape back and upsample to original resolution
-        img_out = img_flat.permute(0, 2, 1).contiguous().reshape(B, C, H, W)
+        img_out = _c(img_flat.permute(0, 2, 1)).reshape(B, C, H, W)
         return self.out_up(img_out)   # (B, out_ch, H*4, W*4)
 
 
@@ -1086,9 +1108,9 @@ class MedSAMLite(nn.Module):
         # Image encoder
         patches = self.patch_embed(x)   # (B, embed, H/ps, W/ps)
         pH, pW  = patches.shape[2], patches.shape[3]
-        tokens  = patches.reshape(B, patches.shape[1], -1).permute(0, 2, 1)  # (B, N, E)
+        tokens  = _c(patches.reshape(B, patches.shape[1], -1)).permute(0, 2, 1)  # (B, N, E)
         tokens  = self.img_blocks(tokens)
-        img_tokens = tokens.permute(0, 2, 1).reshape(B, patches.shape[1], pH, pW)
+        img_tokens = _c(tokens.permute(0, 2, 1)).reshape(B, patches.shape[1], pH, pW)
 
         # Prompt encoder (use seg map if available, else zeros)
         if seg_map is not None:

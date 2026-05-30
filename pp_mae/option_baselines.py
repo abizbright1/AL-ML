@@ -39,8 +39,7 @@ from losses import PPMAELoss
 # ---------------------------------------------------------------------------
 
 class _SafeLayerNorm(nn.LayerNorm):
-    """Manual LayerNorm (elementwise ops) — avoids the MPS native_layer_norm
-    backward `.view()` crash on non-contiguous gradients."""
+    """LayerNorm via elementwise ops — avoids the fused C++ backward's .view() crash on MPS."""
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         dims = tuple(range(-len(self.normalized_shape), 0))
@@ -51,6 +50,24 @@ class _SafeLayerNorm(nn.LayerNorm):
         if self.elementwise_affine:
             x_norm = x_norm * self.weight + self.bias
         return x_norm
+
+
+class _ContiguousFunc(torch.autograd.Function):
+    """Contiguity barrier — makes tensor contiguous in BOTH forward and backward.
+    Place between reshape() and permute()/transpose() so backward gradient is
+    made contiguous before reshape's backward calls .view() on MPS."""
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor) -> torch.Tensor:
+        return x.contiguous()
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor) -> torch.Tensor:
+        return grad.contiguous()
+
+
+def _c(x: torch.Tensor) -> torch.Tensor:
+    return _ContiguousFunc.apply(x)
 
 
 
@@ -96,12 +113,15 @@ class _MPSMHA(nn.Module):
         T = key.shape[1]
         H, D = self.num_heads, self.head_dim
 
-        q = self.q_proj(query).reshape(B, S, H, D).permute(0, 2, 1, 3)  # (B,H,S,D)
-        k = self.k_proj(key  ).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
-        v = self.v_proj(value).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
+        q = _c(self.q_proj(query).reshape(B, S, H, D)).permute(0, 2, 1, 3)  # (B,H,S,D)
+        k = _c(self.k_proj(key  ).reshape(B, T, H, D)).permute(0, 2, 1, 3)  # (B,H,T,D)
+        v = _c(self.v_proj(value).reshape(B, T, H, D)).permute(0, 2, 1, 3)  # (B,H,T,D)
 
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-        out = out.permute(0, 2, 1, 3).reshape(B, S, E)
+        scale = D ** -0.5
+        attn  = torch.matmul(q, k.transpose(-2, -1)) * scale
+        attn  = F.softmax(attn, dim=-1)
+        out   = torch.matmul(attn, v)
+        out = _c(out.permute(0, 2, 1, 3)).reshape(B, S, E)
         out = self.out_proj(out)
         return out, None   # mirrors nn.MultiheadAttention return signature
 
@@ -267,9 +287,8 @@ class VanillaMAE2D(nn.Module):
         p = self.patch
         h = w = self.img_size // p
         B = patches.shape[0]
-        patches = patches.reshape(B, h, w, self.in_chans, p, p)
-        patches = patches.permute(0, 3, 1, 4, 2, 5)   # (B, C, h, p, w, p)
-        return patches.reshape(B, self.in_chans, h * p, w * p)
+        patches = _c(patches.reshape(B, h, w, self.in_chans, p, p)).permute(0, 3, 1, 4, 2, 5)
+        return _c(patches).reshape(B, self.in_chans, h * p, w * p)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -451,9 +470,8 @@ class ViTPPMAE2D(nn.Module):
         p = self.patch
         h = w = self.img_size // p
         B = patches.shape[0]
-        patches = patches.reshape(B, h, w, self.in_chans, p, p)
-        patches = patches.permute(0, 3, 1, 4, 2, 5)
-        return patches.reshape(B, self.in_chans, h * p, w * p)
+        patches = _c(patches.reshape(B, h, w, self.in_chans, p, p)).permute(0, 3, 1, 4, 2, 5)
+        return _c(patches).reshape(B, self.in_chans, h * p, w * p)
 
     def forward(
         self,
@@ -1022,7 +1040,7 @@ class TransUNetLite(nn.Module):
         tokens = e3.flatten(2).transpose(1, 2)      # (B, H4*W4, 128)
         tokens = self.vit_norm(tokens)
         tokens = self.vit_blocks(tokens)            # (B, N, 128)
-        bottleneck = tokens.transpose(1, 2).reshape(B, C, H4, W4)
+        bottleneck = _c(tokens.transpose(1, 2)).reshape(B, C, H4, W4)
 
         # Decoder
         d3 = self.up3(bottleneck)
@@ -1122,9 +1140,8 @@ class _WindowAttnBlock(nn.Module):
             x = F.pad(x, (0, 0, 0, pad_w, 0, pad_h))
         Hp, Wp = H + pad_h, W + pad_w
 
-        x = x.reshape(B, Hp // ws, ws, Wp // ws, ws, C)
-        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()   # (B, nH, nW, ws, ws, C)
-        windows = x.reshape(-1, ws * ws, C)              # (B*nH*nW, ws^2, C)
+        x = _c(x.reshape(B, Hp // ws, ws, Wp // ws, ws, C)).permute(0, 1, 3, 2, 4, 5)
+        windows = _c(x).reshape(-1, ws * ws, C)          # (B*nH*nW, ws^2, C)
         return windows, Hp, Wp, H, W
 
     def _unpartition_windows(
@@ -1136,8 +1153,8 @@ class _WindowAttnBlock(nn.Module):
     ) -> torch.Tensor:
         """Reconstruct (B, H, W, C) from windows."""
         ws = self.window_size
-        x  = windows.reshape(B, Hp // ws, Wp // ws, ws, ws, -1)
-        x  = x.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(B, Hp, Wp, -1)
+        x = _c(windows.reshape(B, Hp // ws, Wp // ws, ws, ws, -1)).permute(0, 1, 3, 2, 4, 5)
+        x = _c(x).reshape(B, Hp, Wp, -1)
         return x[:, :H, :W, :].contiguous()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1542,7 +1559,7 @@ class UNETRLite(nn.Module):
             # Project and reshape to spatial map
             feat = self.skip_proj[i](tokens)          # (B, G², ch[i])
             ch_i = feat.shape[-1]
-            feat = feat.permute(0, 2, 1).reshape(B, ch_i, G, G)
+            feat = _c(feat.permute(0, 2, 1)).reshape(B, ch_i, G, G)
             skip_maps.append(feat)
 
         # Decode by merging skip connections top-down

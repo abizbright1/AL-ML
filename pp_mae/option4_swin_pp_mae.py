@@ -51,22 +51,8 @@ from losses import PPMAELoss
 # ---------------------------------------------------------------------------
 
 class _SafeLayerNorm(nn.LayerNorm):
-    """
-    LayerNorm computed manually with elementwise ops.
-
-    PyTorch's built-in nn.LayerNorm calls the fused C++ kernel
-    `native_layer_norm`, whose *backward* kernel internally runs `.view()`
-    on the incoming gradient.  On Apple MPS that gradient is frequently
-    non-contiguous (it flows back from permute / roll / window ops), so the
-    backward crashes with:
-        "view size is not compatible … Use .reshape() instead."
-
-    Simply calling `x.contiguous()` in forward does NOT help — it only
-    affects the forward input, not the gradient that arrives during
-    backprop.  The reliable fix is to avoid the fused kernel altogether and
-    compose LayerNorm from mean / var / elementwise ops, all of which have
-    MPS-safe backward kernels.
-    """
+    """LayerNorm via elementwise ops — avoids the fused C++ kernel whose
+    backward calls .view() on the incoming gradient, crashing MPS."""
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         dims = tuple(range(-len(self.normalized_shape), 0))
@@ -77,6 +63,41 @@ class _SafeLayerNorm(nn.LayerNorm):
         if self.elementwise_affine:
             x_norm = x_norm * self.weight + self.bias
         return x_norm
+
+
+class _ContiguousFunc(torch.autograd.Function):
+    """
+    Contiguity barrier — makes the tensor contiguous in BOTH forward and
+    backward directions.
+
+    WHY THIS IS NEEDED ON MPS:
+        The pattern  reshape(…) → permute(…)  in forward becomes
+                     permute⁻¹(…) → view(…)   in backward.
+        permute⁻¹ returns a non-contiguous gradient; view() then calls the
+        C++ .view() on that non-contiguous gradient and MPS crashes:
+            "view size is not compatible … Use .reshape() instead."
+
+        Inserting _c() BETWEEN reshape and permute in forward means that in
+        backward, _c.backward() runs BETWEEN permute⁻¹ and view⁻¹, making
+        the gradient contiguous before view⁻¹ needs it.
+
+        Regular .contiguous() has an identity backward (gradient passes through
+        unchanged), so it cannot fix this.  Only a custom Function can force
+        grad.contiguous() in the backward pass.
+    """
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor) -> torch.Tensor:
+        return x.contiguous()
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor) -> torch.Tensor:
+        return grad.contiguous()
+
+
+def _c(x: torch.Tensor) -> torch.Tensor:
+    """Contiguity barrier safe in both forward and backward on MPS."""
+    return _ContiguousFunc.apply(x)
 
 
 # ---------------------------------------------------------------------------
@@ -120,12 +141,13 @@ class _MPSMHA(nn.Module):
         T = key.shape[1]
         H, D = self.num_heads, self.head_dim
 
-        q = self.q_proj(query).reshape(B, S, H, D).permute(0, 2, 1, 3)  # (B,H,S,D)
-        k = self.k_proj(key  ).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
-        v = self.v_proj(value).reshape(B, T, H, D).permute(0, 2, 1, 3)  # (B,H,T,D)
+        # _c() between reshape and permute: in backward, _c.backward() makes
+        # the gradient contiguous before it reaches reshape's backward (.view()),
+        # preventing the MPS "view size not compatible" crash.
+        q = _c(self.q_proj(query).reshape(B, S, H, D)).permute(0, 2, 1, 3)  # (B,H,S,D)
+        k = _c(self.k_proj(key  ).reshape(B, T, H, D)).permute(0, 2, 1, 3)  # (B,H,T,D)
+        v = _c(self.v_proj(value).reshape(B, T, H, D)).permute(0, 2, 1, 3)  # (B,H,T,D)
 
-        # Manual scaled dot-product attention — avoids MPS backward issues
-        # with F.scaled_dot_product_attention on Python 3.9 / older PyTorch builds
         scale = D ** -0.5
         attn  = torch.matmul(q, k.transpose(-2, -1)) * scale  # (B,H,S,T)
         if attn_mask is not None:
@@ -133,7 +155,7 @@ class _MPSMHA(nn.Module):
         attn  = F.softmax(attn, dim=-1)
         out   = torch.matmul(attn, v)                          # (B,H,S,D)
 
-        out = out.permute(0, 2, 1, 3).reshape(B, S, E)
+        out = _c(out.permute(0, 2, 1, 3)).reshape(B, S, E)
         out = self.out_proj(out)
         return out, None   # mirrors nn.MultiheadAttention return signature
 
@@ -197,8 +219,8 @@ def window_partition(x: torch.Tensor, window_size: int) -> tuple[torch.Tensor, t
     if H_pad or W_pad:
         x = F.pad(x, (0, 0, 0, W_pad, 0, H_pad))
     Hp, Wp = H + H_pad, W + W_pad
-    x = x.reshape(B, Hp // window_size, window_size, Wp // window_size, window_size, C)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+    x = _c(x.reshape(B, Hp // window_size, window_size, Wp // window_size, window_size, C))
+    x = _c(x.permute(0, 1, 3, 2, 4, 5))
     return x.reshape(-1, window_size, window_size, C), (H, W)
 
 
@@ -209,8 +231,8 @@ def window_reverse(windows: torch.Tensor, window_size: int, orig_hw: tuple) -> t
     Wp = math.ceil(W_orig / window_size) * window_size
     n_windows_h, n_windows_w = Hp // window_size, Wp // window_size
     B = windows.shape[0] // (n_windows_h * n_windows_w)
-    x = windows.reshape(B, n_windows_h, n_windows_w, window_size, window_size, -1)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous()
+    x = _c(windows.reshape(B, n_windows_h, n_windows_w, window_size, window_size, -1))
+    x = _c(x.permute(0, 1, 3, 2, 4, 5))
     x = x.reshape(B, Hp, Wp, -1)
     return x[:, :H_orig, :W_orig, :].contiguous()
 

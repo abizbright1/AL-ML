@@ -51,8 +51,7 @@ from losses import PPMAELoss
 # ---------------------------------------------------------------------------
 
 class _SafeLayerNorm(nn.LayerNorm):
-    """Manual LayerNorm (elementwise ops) — avoids the MPS native_layer_norm
-    backward `.view()` crash on non-contiguous gradients."""
+    """LayerNorm via elementwise ops — avoids the fused C++ backward's .view() crash on MPS."""
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         dims = tuple(range(-len(self.normalized_shape), 0))
@@ -63,6 +62,22 @@ class _SafeLayerNorm(nn.LayerNorm):
         if self.elementwise_affine:
             x_norm = x_norm * self.weight + self.bias
         return x_norm
+
+
+class _ContiguousFunc(torch.autograd.Function):
+    """Contiguity barrier — makes tensor contiguous in BOTH forward and backward."""
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor) -> torch.Tensor:
+        return x.contiguous()
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor) -> torch.Tensor:
+        return grad.contiguous()
+
+
+def _c(x: torch.Tensor) -> torch.Tensor:
+    return _ContiguousFunc.apply(x)
 
 
 
@@ -345,10 +360,8 @@ class ViTPPMAE(nn.Module):
         D, H, W = self.vol_size
         Gd, Gh, Gw = D // P, H // P, W // P
 
-        tokens = tokens.reshape(-1, Gd, Gh, Gw, C, P, P, P)
-        # (B, Gd, Gh, Gw, C, P, P, P) → (B, C, D, H, W)
-        tokens = tokens.permute(0, 4, 1, 5, 2, 6, 3, 7).contiguous()
-        return tokens.reshape(-1, C, D, H, W)
+        tokens = _c(tokens.reshape(-1, Gd, Gh, Gw, C, P, P, P)).permute(0, 4, 1, 5, 2, 6, 3, 7)
+        return _c(tokens).reshape(-1, C, D, H, W)
 
     # ------------------------------------------------------------------
     def forward(
@@ -395,7 +408,7 @@ class ViTPPMAETrainer:
         """Merge batch and depth dims so (B, C, D, H, W) → (B*D, C, H, W)."""
         if t.dim() == 5:
             B, C, D, H, W = t.shape
-            return t.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
+            return _c(t.permute(0, 2, 1, 3, 4)).reshape(B * D, C, H, W)
         return t
 
     def step(self, batch: dict) -> dict:
