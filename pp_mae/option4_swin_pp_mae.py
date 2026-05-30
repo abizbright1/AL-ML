@@ -566,6 +566,13 @@ class SwinPPMAETrainer:
         self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2)
 
     def step(self, batch: dict) -> dict:
+        # Anomaly detection ON: makes the backward error point at the exact
+        # forward line that produced the failing gradient (set DIAGNOSE=0 to
+        # disable once the offending op is found and fixed).
+        import os
+        if os.environ.get("DIAGNOSE", "1") == "1":
+            torch.autograd.set_detect_anomaly(True)
+
         self.model.train()
         noisy  = batch["noisy"].to(self.device)
         target = batch["target"].to(self.device)
