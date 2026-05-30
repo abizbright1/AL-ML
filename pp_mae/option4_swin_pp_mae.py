@@ -51,8 +51,32 @@ from losses import PPMAELoss
 # ---------------------------------------------------------------------------
 
 class _SafeLayerNorm(nn.LayerNorm):
+    """
+    LayerNorm computed manually with elementwise ops.
+
+    PyTorch's built-in nn.LayerNorm calls the fused C++ kernel
+    `native_layer_norm`, whose *backward* kernel internally runs `.view()`
+    on the incoming gradient.  On Apple MPS that gradient is frequently
+    non-contiguous (it flows back from permute / roll / window ops), so the
+    backward crashes with:
+        "view size is not compatible … Use .reshape() instead."
+
+    Simply calling `x.contiguous()` in forward does NOT help — it only
+    affects the forward input, not the gradient that arrives during
+    backprop.  The reliable fix is to avoid the fused kernel altogether and
+    compose LayerNorm from mean / var / elementwise ops, all of which have
+    MPS-safe backward kernels.
+    """
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return super().forward(x.contiguous())
+        dims = tuple(range(-len(self.normalized_shape), 0))
+        x = x.contiguous()
+        mean = x.mean(dim=dims, keepdim=True)
+        var = x.var(dim=dims, unbiased=False, keepdim=True)
+        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        if self.elementwise_affine:
+            x_norm = x_norm * self.weight + self.bias
+        return x_norm
 
 
 # ---------------------------------------------------------------------------

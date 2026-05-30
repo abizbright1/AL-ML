@@ -62,8 +62,18 @@ from losses import PPMAELoss
 # ============================================================================
 
 class _SafeLayerNorm(nn.LayerNorm):
+    """Manual LayerNorm (elementwise ops) — avoids the MPS native_layer_norm
+    backward `.view()` crash on non-contiguous gradients."""
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return super().forward(x.contiguous())
+        dims = tuple(range(-len(self.normalized_shape), 0))
+        x = x.contiguous()
+        mean = x.mean(dim=dims, keepdim=True)
+        var = x.var(dim=dims, unbiased=False, keepdim=True)
+        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        if self.elementwise_affine:
+            x_norm = x_norm * self.weight + self.bias
+        return x_norm
 
 
 # ============================================================================
