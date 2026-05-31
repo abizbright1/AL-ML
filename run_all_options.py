@@ -76,6 +76,7 @@ from option_baselines import (
     MultiTaskUNet, MultiTaskUNetTrainer,
     TransUNetLite, TransUNetTrainer,
     SwinIRLite, SwinIRTrainer, SwinIRPathologyTrainer,
+    UformerPathologyTrainer,
     UformerLite, UformerTrainer,
     # Existing published works for Round 3
     UNETRLite, UNETRLiteTrainer,
@@ -603,7 +604,11 @@ if 5 in ROUNDS:
 # ── Round 4: Swin Family ──────────────────────────────────────────────────────
 if 4 in ROUNDS:
     r4_cfg = {
-        'Swin PP-MAE': {
+        # ── PP-MAE (Proposed model) ──────────────────────────────────────────
+        # Full Option-4 architecture: cross-modal attention + saliency
+        # reweighting + hierarchical Swin encoder/decoder, trained with
+        # PathologyLoss.  This IS PP-MAE applied to a Swin backbone.
+        'PP-MAE (Swin) [PROPOSED]': {
             'model': SwinPPMAE(
                 in_ch=4, embed_dim=48, depths=(2, 2, 2, 2),
                 n_heads=(3, 3, 6, 6), window_size=4,
@@ -611,23 +616,33 @@ if 4 in ROUNDS:
             'trainer_fn': lambda m: SwinPPMAETrainer(m, device=DEVICE),
             'infer_fn': lambda m, noisy, seg: m(noisy, seg),
         },
+
+        # ── Swin baselines: same architecture, plain L1 loss ─────────────────
         'SwinIR-lite (L1)': {
             'model': SwinIRLite(in_ch=4, dim=64, n_blocks=4, window_size=4),
             'trainer_fn': lambda m: SwinIRTrainer(m, device=DEVICE, lr=1e-4),
             'infer_fn': lambda m, noisy, seg: m(noisy),
         },
-        # Controlled comparison: IDENTICAL SwinIR architecture, only the loss
-        # changes (pathology-preserving composite instead of plain L1).
-        # Isolates the effect of PathologyLoss on a Swin backbone.
+        'Uformer-lite (L1)': {
+            'model': UformerLite(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: UformerTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy),
+        },
+
+        # ── Controlled ablation: same Swin backbone + PathologyLoss ──────────
+        # Architecture is IDENTICAL to the L1 baselines above.  Only the loss
+        # changes.  Proves PathologyLoss helps on Swin backbones independently
+        # of the full PP-MAE architecture.
         'SwinIR + PathologyLoss': {
             'model': SwinIRLite(in_ch=4, dim=64, n_blocks=4, window_size=4),
             'trainer_fn': lambda m: SwinIRPathologyTrainer(m, device=DEVICE, lr=1e-4,
                                                            mode='clinical_risk'),
             'infer_fn': lambda m, noisy, seg: m(noisy),
         },
-        'Uformer-lite': {
+        'Uformer + PathologyLoss': {
             'model': UformerLite(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: UformerTrainer(m, device=DEVICE, lr=1e-4),
+            'trainer_fn': lambda m: UformerPathologyTrainer(m, device=DEVICE, lr=1e-4,
+                                                            mode='clinical_risk'),
             'infer_fn': lambda m, noisy, seg: m(noisy),
         },
     }
