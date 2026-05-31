@@ -308,6 +308,25 @@ def evaluate_model(
     }
 
 
+def _move_trainer_to_cpu(trainer: object) -> None:
+    """Move a trainer's model + device to CPU in place.
+
+    Safe because the MPS crash happens during the FIRST batch's backward pass,
+    before optimizer.step() ever runs — so there is no stale optimizer state on
+    the GPU.  The optimizer keeps referencing the same Parameter objects, whose
+    data .to('cpu') moves in place, so it transparently continues on CPU.
+    """
+    if hasattr(trainer, 'model'):
+        trainer.model.to('cpu')
+    if hasattr(trainer, 'device'):
+        trainer.device = 'cpu'
+
+
+def _is_mps_view_crash(err: Exception) -> bool:
+    msg = str(err).lower()
+    return 'view size is not compatible' in msg or 'not compatible with input tensor' in msg
+
+
 def train_and_eval(
     round_name:   str,
     models_cfg:   Dict[str, Dict],
@@ -343,20 +362,38 @@ def train_and_eval(
         trainer  = cfg['trainer_fn'](model)
         infer_fn = cfg['infer_fn']
         hist     = []
+        model_device = device   # may switch to 'cpu' if this model crashes on MPS
 
         print(f"\n  [{name}]", flush=True)
-        for ep in range(1, epochs + 1):
-            loss = run_epoch(trainer, train_loader_)
-            hist.append(loss)
-            if hasattr(trainer, 'scheduler'):
-                trainer.scheduler.step()
-            if ep % 5 == 0 or ep == 1:
-                print(f"    Ep {ep:2d}/{epochs}  loss={loss:.4f}", flush=True)
+        try:
+            for ep in range(1, epochs + 1):
+                loss = run_epoch(trainer, train_loader_)
+                hist.append(loss)
+                if hasattr(trainer, 'scheduler'):
+                    trainer.scheduler.step()
+                if ep % 5 == 0 or ep == 1:
+                    print(f"    Ep {ep:2d}/{epochs}  loss={loss:.4f}", flush=True)
+        except RuntimeError as e:
+            if model_device == 'mps' and _is_mps_view_crash(e):
+                print(f"    ⚠️  MPS backward crash — falling back to CPU for [{name}] "
+                      f"and restarting its training.", flush=True)
+                _move_trainer_to_cpu(trainer)
+                model_device = 'cpu'
+                hist = []
+                for ep in range(1, epochs + 1):
+                    loss = run_epoch(trainer, train_loader_)
+                    hist.append(loss)
+                    if hasattr(trainer, 'scheduler'):
+                        trainer.scheduler.step()
+                    if ep % 5 == 0 or ep == 1:
+                        print(f"    Ep {ep:2d}/{epochs}  loss={loss:.4f}  (cpu)", flush=True)
+            else:
+                raise
 
         histories[name] = hist
 
-        # Evaluate
-        metrics = evaluate_model(model, infer_fn, val_loader_, seg_model_, device)
+        # Evaluate on whichever device this model ended up on
+        metrics = evaluate_model(model, infer_fn, val_loader_, seg_model_, model_device)
         results[name] = metrics
         print(
             f"    PSNR={metrics['psnr']:.2f}  SSIM={metrics['ssim']:.3f}  "
