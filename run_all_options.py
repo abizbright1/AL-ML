@@ -118,10 +118,14 @@ _parser.add_argument('--max_subjects', type=int,   default=None,
                      help='Limit number of BraTS subjects (None = all; demo uses 6)')
 _parser.add_argument('--rounds',       type=str,   default='1,2,3,4,5',
                      help='Comma-separated list of rounds to run (e.g. "1,3,5")')
+_parser.add_argument('--device', type=str, default=None,
+                     help='Force device: cpu, mps, or cuda (default: auto-detect)')
 _args = _parser.parse_args()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-if torch.cuda.is_available():
+if _args.device:
+    DEVICE = _args.device
+elif torch.cuda.is_available():
     DEVICE = 'cuda'
 elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     DEVICE = 'mps'
