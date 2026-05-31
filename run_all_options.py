@@ -75,7 +75,7 @@ from option_baselines import (
     SparKCNN, SparKCNNTrainer,
     MultiTaskUNet, MultiTaskUNetTrainer,
     TransUNetLite, TransUNetTrainer,
-    SwinIRLite, SwinIRTrainer,
+    SwinIRLite, SwinIRTrainer, SwinIRPathologyTrainer,
     UformerLite, UformerTrainer,
     # Existing published works for Round 3
     UNETRLite, UNETRLiteTrainer,
@@ -611,9 +611,18 @@ if 4 in ROUNDS:
             'trainer_fn': lambda m: SwinPPMAETrainer(m, device=DEVICE),
             'infer_fn': lambda m, noisy, seg: m(noisy, seg),
         },
-        'SwinIR-lite': {
+        'SwinIR-lite (L1)': {
             'model': SwinIRLite(in_ch=4, dim=64, n_blocks=4, window_size=4),
             'trainer_fn': lambda m: SwinIRTrainer(m, device=DEVICE, lr=1e-4),
+            'infer_fn': lambda m, noisy, seg: m(noisy),
+        },
+        # Controlled comparison: IDENTICAL SwinIR architecture, only the loss
+        # changes (pathology-preserving composite instead of plain L1).
+        # Isolates the effect of PathologyLoss on a Swin backbone.
+        'SwinIR + PathologyLoss': {
+            'model': SwinIRLite(in_ch=4, dim=64, n_blocks=4, window_size=4),
+            'trainer_fn': lambda m: SwinIRPathologyTrainer(m, device=DEVICE, lr=1e-4,
+                                                           mode='clinical_risk'),
             'infer_fn': lambda m, noisy, seg: m(noisy),
         },
         'Uformer-lite': {

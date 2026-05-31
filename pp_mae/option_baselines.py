@@ -1270,6 +1270,53 @@ class SwinIRTrainer:
         return self.model(noisy.to(self.device)).cpu()
 
 
+class SwinIRPathologyTrainer:
+    """
+    Trainer for SwinIRLite using the pathology-preserving composite loss
+    (global + PathologyLoss + cross-modal) INSTEAD of plain L1.
+
+    This is the controlled-comparison partner of SwinIRTrainer: the network
+    architecture is byte-for-byte identical, only the loss function changes.
+    Comparing the two isolates the effect of pathology-preserving training on
+    a Swin backbone — exactly the Round-3 design (MultiTask-UNet vs PP-MAE
+    Option 3) but applied to the Swin family.
+    """
+
+    def __init__(
+        self,
+        model:  SwinIRLite,
+        device: str   = 'cuda',
+        lr:     float = 1e-4,
+        mode:   str   = 'clinical_risk',
+        lambda1: float = 1.0,
+        lambda2: float = 0.5,
+    ):
+        from losses import PPMAELoss
+        self.model   = model.to(device)
+        self.device  = device
+        self.optim   = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2, mode=mode)
+
+    def step(self, batch: Dict) -> Dict[str, float]:
+        self.model.train()
+        noisy  = batch['noisy'].to(self.device)
+        target = batch['target'].to(self.device)
+        seg    = batch['seg'].to(self.device)
+
+        self.optim.zero_grad()
+        pred   = self.model(noisy)                 # same SwinIR forward, no seg needed
+        losses = self.loss_fn(pred, target, seg)   # pathology-preserving loss
+        losses['total'].backward()
+        nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.optim.step()
+        return {k: (v.item() if torch.is_tensor(v) else v) for k, v in losses.items()}
+
+    @torch.no_grad()
+    def predict(self, noisy: torch.Tensor) -> torch.Tensor:
+        self.model.eval()
+        return self.model(noisy.to(self.device)).cpu()
+
+
 # ---------------------------------------------------------------------------
 # UformerLite — U-Net shaped network with window attention at each scale
 # ---------------------------------------------------------------------------
