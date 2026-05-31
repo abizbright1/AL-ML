@@ -324,6 +324,10 @@ def _move_trainer_to_cpu(trainer: object) -> None:
     """
     if hasattr(trainer, 'model'):
         trainer.model.to('cpu')
+    # Move the loss module too — clinical_risk PathologyLoss has a learnable
+    # risk_net submodule that must follow the data to CPU.
+    if hasattr(trainer, 'loss_fn') and hasattr(trainer.loss_fn, 'to'):
+        trainer.loss_fn.to('cpu')
     if hasattr(trainer, 'device'):
         trainer.device = 'cpu'
 

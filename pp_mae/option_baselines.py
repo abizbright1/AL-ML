@@ -1295,7 +1295,9 @@ class SwinIRPathologyTrainer:
         self.model   = model.to(device)
         self.device  = device
         self.optim   = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
-        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2, mode=mode)
+        # .to(device): the clinical_risk loss has a learnable risk_net submodule
+        # whose parameters must live on the same device as the data.
+        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2, mode=mode).to(device)
 
     def step(self, batch: Dict) -> Dict[str, float]:
         self.model.train()
@@ -1500,7 +1502,8 @@ class UformerPathologyTrainer:
         self.model   = model.to(device)
         self.device  = device
         self.optim   = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
-        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2, mode=mode)
+        # .to(device): clinical_risk loss has a learnable risk_net submodule.
+        self.loss_fn = PPMAELoss(lambda1=lambda1, lambda2=lambda2, mode=mode).to(device)
 
     def step(self, batch: Dict) -> Dict[str, float]:
         self.model.train()
