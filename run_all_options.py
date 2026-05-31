@@ -291,8 +291,13 @@ def evaluate_model(
                 ss_.append(ssim_numpy(p_np, t_np))
                 nr_.append(nrmse(p_np, t_np))
 
-            # Downstream segmentation on denoised output
-            logits = seg_model_(pred_cpu.to(device))
+            # Downstream segmentation on denoised output.
+            # The shared segmentor may live on a different device than the
+            # denoiser (e.g. denoiser fell back to CPU after an MPS crash while
+            # the segmentor is still on MPS), so always send its input to the
+            # segmentor's OWN device.
+            seg_device = next(seg_model_.parameters()).device
+            logits = seg_model_(pred_cpu.to(seg_device))
             gt_lab = b['seg'][:, 0].long()
             m      = seg_metrics(logits.cpu(), gt_lab)
             dw_.append(m['dice_wt'])
