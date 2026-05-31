@@ -95,7 +95,7 @@ from sota_baselines import (
 
 # ── Shared utilities ──────────────────────────────────────────────────────────
 from segmentor import UNetSegmentor, SegTrainer, seg_metrics
-from evaluation import psnr, ssim_numpy, nrmse
+from evaluation import psnr, ssim_numpy, nrmse, seg_metrics_per_sample
 from brats_loader import BraTSDataset, make_demo_brats
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -299,10 +299,12 @@ def evaluate_model(
             seg_device = next(seg_model_.parameters()).device
             logits = seg_model_(pred_cpu.to(seg_device))
             gt_lab = b['seg'][:, 0].long()
-            m      = seg_metrics(logits.cpu(), gt_lab)
-            dw_.append(m['dice_wt'])
-            dt_.append(m['dice_tc'])
-            de_.append(m['dice_et'])
+            # Per-sample Dice (one value per slice) — enables per-subject
+            # mean ± std and paired significance testing across the val set.
+            m      = seg_metrics_per_sample(logits.cpu(), gt_lab)
+            dw_.extend(m['dice_wt'])
+            dt_.extend(m['dice_tc'])
+            de_.extend(m['dice_et'])
 
     return {
         'psnr':    float(np.mean(ps_)),
@@ -311,6 +313,12 @@ def evaluate_model(
         'dice_wt': float(np.mean(dw_)),
         'dice_tc': float(np.mean(dt_)),
         'dice_et': float(np.mean(de_)),
+        'dice_wt_std': float(np.std(dw_, ddof=1)) if len(dw_) > 1 else 0.0,
+        'dice_tc_std': float(np.std(dt_, ddof=1)) if len(dt_) > 1 else 0.0,
+        'dice_et_std': float(np.std(de_, ddof=1)) if len(de_) > 1 else 0.0,
+        '_dice_wt_samples': dw_,
+        '_dice_tc_samples': dt_,
+        '_dice_et_samples': de_,
     }
 
 
@@ -671,7 +679,7 @@ ROUND_LABELS = {
     'Round 1 — CNN':        ('ROUND 1', 'PP-MAE CNN (clinical_risk)'),
     'Round 2 — ViT/MAE':    ('ROUND 2', 'ViT PP-MAE 2D'),
     'Round 3 — Multi-task': ('ROUND 3', 'PP-MAE Pipeline'),
-    'Round 4 — Swin':       ('ROUND 4', 'Swin PP-MAE'),
+    'Round 4 — Swin':       ('ROUND 4', 'PP-MAE (Swin) [PROPOSED]'),
     'Round 5 — SOTA':       ('ROUND 5', 'PP-MAE Pipeline'),
 }
 
@@ -758,7 +766,7 @@ PPMAE_NAME_MAP = {
     'Round 1 — CNN':        'PP-MAE CNN (clinical_risk)',
     'Round 2 — ViT/MAE':    'ViT PP-MAE 2D',
     'Round 3 — Multi-task': 'PP-MAE Pipeline',
-    'Round 4 — Swin':       'Swin PP-MAE',
+    'Round 4 — Swin':       'PP-MAE (Swin) [PROPOSED]',
     'Round 5 — SOTA':       'PP-MAE Pipeline',
 }
 
@@ -964,3 +972,76 @@ if table_rows:
 # =============================================================================
 print(f"\nAll outputs saved to: {OUT}", flush=True)
 print("Run complete.", flush=True)
+
+
+# =============================================================================
+# STATISTICAL SIGNIFICANCE (Wilcoxon signed-rank, proposed vs each baseline)
+# =============================================================================
+# Paired non-parametric test on per-sample Dice.  All models are evaluated on
+# the SAME validation slices in the SAME order, so the per-sample arrays stored
+# in each result dict (keys prefixed with '_') are paired.
+def _wilcoxon_p(a, b):
+    try:
+        from scipy.stats import wilcoxon
+        a = np.asarray(a, float); b = np.asarray(b, float)
+        n = min(len(a), len(b))
+        if n < 2:
+            return None
+        a = a[:n]; b = b[:n]
+        if np.allclose(a, b):
+            return 1.0
+        return float(wilcoxon(a, b).pvalue)
+    except Exception:
+        return None
+
+
+def _sig_stars(p):
+    if p is None:
+        return 'n/a'
+    if p < 0.001:
+        return '***'
+    if p < 0.01:
+        return '**'
+    if p < 0.05:
+        return '*'
+    return 'ns'
+
+
+_sig_rows = []
+print(f"\n{'='*70}", flush=True)
+print("  STATISTICAL SIGNIFICANCE - proposed vs baselines", flush=True)
+print("  Wilcoxon signed-rank on per-sample Dice (*p<.05 **p<.01 ***p<.001)", flush=True)
+print(f"{'='*70}", flush=True)
+for _rk, _results in all_results.items():
+    _prop_name = PPMAE_NAME_MAP.get(_rk)
+    if _prop_name not in _results:
+        continue
+    _prop = _results[_prop_name]
+    print(f"\n{_rk}  (proposed: {_prop_name})", flush=True)
+    for _method, _m in _results.items():
+        if _method == _prop_name:
+            continue
+        for _region, _mkey, _skey in [
+            ('Dice_WT', 'dice_wt', '_dice_wt_samples'),
+            ('Dice_TC', 'dice_tc', '_dice_tc_samples'),
+            ('Dice_ET', 'dice_et', '_dice_et_samples'),
+        ]:
+            _p = _wilcoxon_p(_prop.get(_skey, []), _m.get(_skey, []))
+            _star = _sig_stars(_p)
+            _delta = _prop[_mkey] - _m[_mkey]
+            _sig_rows.append((_rk, _prop_name, _method, _region,
+                              _prop[_mkey], _m[_mkey], _p, _star))
+            _pstr = f"{_p:.4g}" if _p is not None else "n/a"
+            print(f"    vs {_method:28s} {_region}: d={_delta:+.3f}  p={_pstr:>8s} {_star}",
+                  flush=True)
+
+_sig_csv = os.path.join(OUT, 'significance.csv')
+with open(_sig_csv, 'w', newline='') as _f:
+    _w = csv.writer(_f)
+    _w.writerow(['Round', 'Proposed', 'Baseline', 'Region',
+                 'Mean_Proposed', 'Mean_Baseline', 'Delta', 'p_value', 'Significance'])
+    for (_rk, _pn, _bn, _rg, _mp, _mb, _p, _star) in _sig_rows:
+        _w.writerow([_rk, _pn, _bn, _rg, f"{_mp:.4f}", f"{_mb:.4f}",
+                     f"{_mp - _mb:+.4f}", ('' if _p is None else f"{_p:.6g}"), _star])
+print(f"\nSaved {_sig_csv}", flush=True)
+print("Significance testing complete.", flush=True)

@@ -46,6 +46,37 @@ def ssim_numpy(pred: np.ndarray, target: np.ndarray, data_range: float = 1.0) ->
     return float(num / (den + 1e-8))
 
 
+def seg_metrics_per_sample(logits, gt_label):
+    """
+    Per-sample BraTS Dice (WT, TC, ET) — one value per slice in the batch.
+    Enables per-subject mean ± std and paired significance testing.
+
+    logits:   (B, n_classes, H, W) — segmentor output
+    gt_label: (B, H, W)            — integer labels 0=BG,1=NCR,2=ED,3=ET
+
+    Returns dict of lists (length B): dice_wt, dice_tc, dice_et.
+    """
+    import torch
+    pred = logits.argmax(dim=1)  # (B, H, W)
+
+    def dice(pred_mask, gt_mask):
+        inter = (pred_mask & gt_mask).float().sum()
+        denom = pred_mask.float().sum() + gt_mask.float().sum()
+        return (2 * inter / denom).item() if denom > 0 else 1.0
+
+    regions = {'dice_wt': [1, 2, 3], 'dice_tc': [1, 3], 'dice_et': [3]}
+    out = {k: [] for k in regions}
+    for i in range(pred.shape[0]):
+        for key, labels in regions.items():
+            gt_mask   = torch.zeros_like(gt_label[i], dtype=torch.bool)
+            pred_mask = torch.zeros_like(pred[i], dtype=torch.bool)
+            for lb in labels:
+                gt_mask   |= (gt_label[i] == lb)
+                pred_mask |= (pred[i] == lb)
+            out[key].append(dice(pred_mask, gt_mask))
+    return out
+
+
 def compute_image_quality_metrics(
     pred: np.ndarray,   # (C, H, W) or (H, W)
     target: np.ndarray,
