@@ -55,7 +55,11 @@ from typing import Optional, Dict, Tuple, List, Callable
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_SCRIPT_DIR, 'pp_mae'))
+_REPO_ROOT  = os.path.dirname(_SCRIPT_DIR)
+# Support both old flat layout (models at repo root) and new organised layout (model/)
+sys.path.insert(0, os.path.join(_SCRIPT_DIR, 'pp_mae'))  # legacy subfolder
+sys.path.insert(0, os.path.join(_REPO_ROOT, 'model'))    # organised layout
+sys.path.insert(0, _REPO_ROOT)                            # flat/root fallback
 
 # ── PP-MAE Option imports ─────────────────────────────────────────────────────
 from option1_cnn_pp_mae import CNNPPMAE, PPMAETrainer

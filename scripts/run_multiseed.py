@@ -60,10 +60,11 @@ def run_seed(data_dir, seed, args, out_root):
         '--seed',         str(seed),
         '--out',          seed_out,
     ]
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     print(f"\n{'='*60}")
     print(f"  Running seed={seed}  →  {seed_out}")
     print(f"{'='*60}\n", flush=True)
-    result = subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, cwd=repo_root)
     return os.path.join(seed_out, 'options_results.csv')
 
 

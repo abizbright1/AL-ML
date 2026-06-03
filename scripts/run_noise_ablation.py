@@ -88,10 +88,11 @@ def run_sigma(data_dir, sigma, args, out_root):
         '--seed',         '42',
         '--out',          sigma_out,
     ]
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     print(f"\n{'='*60}")
     print(f"  Running σ={sigma:.2f}  →  {sigma_out}")
     print(f"{'='*60}\n", flush=True)
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, cwd=repo_root)
     return os.path.join(sigma_out, 'options_results.csv')
 
 
