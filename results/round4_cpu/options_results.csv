@@ -1,0 +1,4 @@
+Round,Method,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET
+Round 4 — Swin,Swin PP-MAE,15.5947,0.4565,0.6307,0.2887,0.1617,0.1019
+Round 4 — Swin,SwinIR-lite,25.3140,0.9106,0.2050,0.8992,0.6959,0.6248
+Round 4 — Swin,Uformer-lite,20.9578,0.7284,0.3355,0.8467,0.0000,0.0000

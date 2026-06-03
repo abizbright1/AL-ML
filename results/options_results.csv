@@ -1,0 +1,7 @@
+Round,Method,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET
+Round 3 — Multi-task,PP-MAE Pipeline,11.6398,0.2984,0.8610,0.8758,0.7820,0.7111
+Round 3 — Multi-task,MultiTask-UNet,11.5990,0.0878,0.8648,0.0005,0.0007,0.0000
+Round 3 — Multi-task,TransUNet-lite,15.5300,0.5285,0.5498,0.8537,0.6790,0.3607
+Round 3 — Multi-task,UNETR-lite,12.2809,0.0634,0.7995,0.1631,0.0000,0.0000
+Round 3 — Multi-task,SwinUNETR-lite,13.6114,0.2678,0.6856,0.9332,0.5799,0.2431
+Round 3 — Multi-task,SeqPipeline,21.9566,0.8863,0.2625,0.9999,0.9957,0.9587
