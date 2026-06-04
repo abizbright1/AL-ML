@@ -230,7 +230,7 @@ class nnUNetLite(nn.Module):
         self.dec_convs = nn.ModuleList()
         for i in range(depth):
             out_ch = dec_chs[i+1] if i+1 < depth else dec_chs[-1]
-            self.dec_ups.append(nn.ConvTranspose2d(dec_chs[i], dec_chs[i], 2, stride=2))
+            self.dec_ups.append(nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(dec_chs[i], dec_chs[i], kernel_size=3, padding=1)))
             self.dec_convs.append(nn.Sequential(
                 nn.Conv2d(dec_chs[i]*2, out_ch, 3, padding=1, bias=False),
                 nn.InstanceNorm2d(out_ch, affine=True),
@@ -383,7 +383,7 @@ class TransBTSLite(nn.Module):
         self.dec_convs = nn.ModuleList()
         for i in range(depth):
             out_ch = dec_chs[i+1] if i+1 < depth else dec_chs[-1]
-            self.dec_ups.append(nn.ConvTranspose2d(dec_chs[i], dec_chs[i], 2, stride=2))
+            self.dec_ups.append(nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(dec_chs[i], dec_chs[i], kernel_size=3, padding=1)))
             self.dec_convs.append(nn.Sequential(
                 nn.Conv2d(dec_chs[i]*2, out_ch, 3, padding=1, bias=False),
                 nn.BatchNorm2d(out_ch),
@@ -513,7 +513,7 @@ class _DiffusionUNet(nn.Module):
         self.dec_time_pr  = nn.ModuleList()
         for i in range(depth):
             out_ch = dec_chs[i+1] if i+1 < depth else dec_chs[-1]
-            self.dec_ups.append(nn.ConvTranspose2d(dec_chs[i], dec_chs[i], 2, stride=2))
+            self.dec_ups.append(nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(dec_chs[i], dec_chs[i], kernel_size=3, padding=1)))
             self.dec_convs.append(nn.Sequential(
                 nn.Conv2d(dec_chs[i]*2, out_ch, 3, padding=1, bias=False),
                 nn.GroupNorm(8, out_ch),
@@ -847,7 +847,7 @@ class SwinUNETRv2Lite(nn.Module):
         self.dec_ups   = nn.ModuleList()
         self.dec_convs = nn.ModuleList()
         for i in range(depth):
-            self.dec_ups.append(nn.ConvTranspose2d(dec_dims[i], dec_dims[i], 2, stride=2))
+            self.dec_ups.append(nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(dec_dims[i], dec_dims[i], kernel_size=3, padding=1)))
             self.dec_convs.append(nn.Sequential(
                 nn.Conv2d(dec_dims[i] + dec_dims[i+1], dec_dims[i+1], 3, padding=1, bias=False),
                 nn.GroupNorm(1, dec_dims[i+1]),
@@ -1003,9 +1003,11 @@ class _SAMLikeDecoder(nn.Module):
         )
         self.norm3  = _SafeLayerNorm(embed_dim)
         self.out_up = nn.Sequential(
-            nn.ConvTranspose2d(embed_dim, embed_dim // 2, 2, stride=2),
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv2d(embed_dim, embed_dim // 2, kernel_size=3, padding=1),
             nn.GELU(),
-            nn.ConvTranspose2d(embed_dim // 2, out_ch, 2, stride=2),
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv2d(embed_dim // 2, out_ch, kernel_size=3, padding=1),
         )
 
     def forward(self, img_tokens: torch.Tensor,
@@ -1266,7 +1268,7 @@ class MedNeXtLite(nn.Module):
         self.dec_convs = nn.ModuleList()
         for i in range(depth):
             out_ch = dec_chs[i+1] if i+1 < depth else dec_chs[-1]
-            self.dec_ups.append(nn.ConvTranspose2d(dec_chs[i], dec_chs[i], 2, stride=2))
+            self.dec_ups.append(nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(dec_chs[i], dec_chs[i], kernel_size=3, padding=1)))
             self.dec_convs.append(nn.Sequential(
                 nn.Conv2d(dec_chs[i]*2, out_ch, 1),
                 *[_MedNeXtBlock(out_ch, kernel_size) for _ in range(n_blocks_per_stage)],

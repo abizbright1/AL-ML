@@ -543,7 +543,7 @@ class _SparKDecoderBlock(nn.Module):
         super().__init__()
         # Upsample halves channels; then cat with skip
         self.up_ch = in_ch // 2
-        self.up    = nn.ConvTranspose2d(in_ch, self.up_ch, kernel_size=2, stride=2)
+        self.up    = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(in_ch, self.up_ch, kernel_size=3, padding=1))
         self.conv  = nn.Sequential(
             nn.Conv2d(self.up_ch + skip_ch, out_ch, 3, padding=1, bias=False),
             nn.BatchNorm2d(out_ch),
@@ -1628,7 +1628,8 @@ class UNETRLite(nn.Module):
         c = ch[0]
         while up_factor > 1:
             layers_list += [
-                nn.ConvTranspose2d(c, c // 2, 2, stride=2),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+                nn.Conv2d(c, c // 2, kernel_size=3, padding=1),
                 nn.GELU(),
             ]
             c = c // 2
@@ -1778,14 +1779,14 @@ class SwinUNETRLite(nn.Module):
         # Decoder with skip connections (SwinUNETR style)
         # Note: Conv2d merges → (B,C,H,W); _WindowAttnBlock takes (B,H,W,C).
         # We store them separately and apply them with explicit format swaps in forward().
-        self.up21      = nn.ConvTranspose2d(dims[2], dims[1], 2, stride=2)
+        self.up21      = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(dims[2], dims[1], kernel_size=3, padding=1))
         self.dec1_conv = nn.Sequential(
             nn.Conv2d(dims[1] * 2, dims[1], 3, padding=1),
             nn.InstanceNorm2d(dims[1]), nn.GELU(),
         )
         self.dec1_attn = _WindowAttnBlock(dims[1], max(1, dims[1] // 16), window_size)
 
-        self.up10      = nn.ConvTranspose2d(dims[1], dims[0], 2, stride=2)
+        self.up10      = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(dims[1], dims[0], kernel_size=3, padding=1))
         self.dec0_conv = nn.Sequential(
             nn.Conv2d(dims[0] * 2, dims[0], 3, padding=1),
             nn.InstanceNorm2d(dims[0]), nn.GELU(),
@@ -1899,9 +1900,9 @@ class _SeqSegNet(nn.Module):
         self.e2 = _cb(base,  base * 2)
         self.e3 = _cb(base * 2, base * 4)
         self.pool = nn.MaxPool2d(2)
-        self.up2  = nn.ConvTranspose2d(base * 4, base * 2, 2, stride=2)
+        self.up2  = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(base * 4, base * 2, kernel_size=3, padding=1))
         self.d2   = _cb(base * 4, base * 2)
-        self.up1  = nn.ConvTranspose2d(base * 2, base, 2, stride=2)
+        self.up1  = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(base * 2, base, kernel_size=3, padding=1))
         self.d1   = _cb(base * 2, base)
         self.head = nn.Conv2d(base, 4, 1)
 

@@ -85,7 +85,7 @@ class EncoderBlock(nn.Module):
 class DecoderBlock(nn.Module):
     def __init__(self, in_ch: int, skip_ch: int, out_ch: int):
         super().__init__()
-        self.up   = nn.ConvTranspose2d(in_ch, in_ch // 2, 2, stride=2)
+        self.up   = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(in_ch, in_ch // 2, kernel_size=3, padding=1))
         self.conv = ConvBnRelu(in_ch // 2 + skip_ch, out_ch)
         self.res  = ResBlock(out_ch)
 

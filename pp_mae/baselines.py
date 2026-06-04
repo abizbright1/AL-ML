@@ -137,11 +137,11 @@ class StandardUNet(nn.Module):
         self.enc2 = _DoubleConv(b,  b*2)
         self.enc3 = _DoubleConv(b*2, b*4)
         self.bot  = _DoubleConv(b*4, b*8)
-        self.up3  = nn.ConvTranspose2d(b*8, b*4, 2, stride=2)
+        self.up3  = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(b*8, b*4, kernel_size=3, padding=1))
         self.dec3 = _DoubleConv(b*8, b*4)
-        self.up2  = nn.ConvTranspose2d(b*4, b*2, 2, stride=2)
+        self.up2  = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(b*4, b*2, kernel_size=3, padding=1))
         self.dec2 = _DoubleConv(b*4, b*2)
-        self.up1  = nn.ConvTranspose2d(b*2, b, 2, stride=2)
+        self.up1  = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(b*2, b, kernel_size=3, padding=1))
         self.dec1 = _DoubleConv(b*2, b)
         self.out  = nn.Conv2d(b, out_channels, 1)
         self.pool = nn.MaxPool2d(2)
@@ -251,7 +251,7 @@ class _ConvBnRelu(nn.Module):
 class _DeconvBnRelu(nn.Module):
     def __init__(self, in_ch, out_ch, **kw):
         super().__init__()
-        self.net = nn.Sequential(nn.ConvTranspose2d(in_ch, out_ch, **kw),
+        self.net = nn.Sequential(nn.Conv2d(in_ch, out_ch, **kw),
                                   nn.BatchNorm2d(out_ch), nn.ReLU(inplace=True))
     def forward(self, x): return self.net(x)
 
@@ -280,7 +280,7 @@ class REDNet(nn.Module):
         self.decoders = nn.ModuleList()
         for _ in range(num_layers - 1):
             self.decoders.append(_DeconvBnRelu(features, features, kernel_size=3, padding=1))
-        self.decoders.append(nn.ConvTranspose2d(features, out_channels, kernel_size=3, padding=1))
+        self.decoders.append(nn.Conv2d(features, out_channels, kernel_size=3, padding=1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         enc_feats = []

@@ -140,11 +140,11 @@ class StandardUNet(nn.Module):
         # Bottleneck
         self.bn = self._block(base*4, base*4)
         # Decoder
-        self.up3 = nn.ConvTranspose2d(base*4, base*4, 2, stride=2)
+        self.up3 = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(base*4, base*4, kernel_size=3, padding=1))
         self.d3  = self._block(base*8, base*2)
-        self.up2 = nn.ConvTranspose2d(base*2, base*2, 2, stride=2)
+        self.up2 = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(base*2, base*2, kernel_size=3, padding=1))
         self.d2  = self._block(base*4, base)
-        self.up1 = nn.ConvTranspose2d(base, base, 2, stride=2)
+        self.up1 = nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'), nn.Conv2d(base, base, kernel_size=3, padding=1))
         self.d1  = self._block(base*2, base)
         self.out = nn.Conv2d(base, ch, 1)
 
