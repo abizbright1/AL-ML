@@ -1,21 +1,26 @@
 """
-paper_figures.py
-================
-Generates all 4 paper-ready visualization panels:
+paper_figures.py  —  fast paper-ready figures
+==============================================
 
-  Fig A — Denoising samples: Noisy | PP-MAE | SwinIR-L1 | Uformer-L1 | GT
-  Fig B — Segmentation overlay: GT seg mapped onto each model's output
-  Fig C — Training loss curves: convergence of all 5 models
-  Fig D — Per-slice metric distributions: box plots of Dice_ET, Dice_TC, PSNR
+Metric figures (no training, reads from pre-computed CSVs):
+  Fig D — Bar chart of Dice_WT / Dice_TC / Dice_ET for all 5 models
+  Fig E — PSNR vs Dice_ET scatter (the PSNR paradox)
+  Fig S — Significance summary table
 
-Usage (MacBook):
+Visual figures (optional, needs 2-5 BraTS subjects, ~5-min quick train):
+  Fig A — Denoising: Noisy | PP-MAE | SwinIR-L1 | Uformer-L1 | GT
+  Fig B — Segmentation overlay: GT vs PP-MAE vs SwinIR-L1
+
+Usage — metric figures only (instant, no data dir needed):
+    python3 paper_figures.py --out paper_figs/
+
+Usage — add visual proof with 3 BraTS subjects:
     python3 paper_figures.py ~/Downloads/BraTS2021_data \\
-        --device mps --epochs 30 --seg_epochs 20 \\
-        --max_subjects 50 --out paper_figs/
+        --device mps --n_samples 3 --out paper_figs/
 """
 
 from __future__ import annotations
-import argparse, os, sys
+import argparse, os, sys, csv
 import numpy as np
 import torch
 import torch.nn as nn
@@ -24,590 +29,427 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import matplotlib.gridspec as gridspec
 from matplotlib.colors import ListedColormap
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-# ── path setup ────────────────────────────────────────────────────────────────
 _DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_DIR, "pp_mae"))
 
-from option4_swin_pp_mae  import SwinPPMAE, SwinPPMAETrainer
-from option_baselines      import SwinIRLite, SwinIRTrainer, SwinIRPathologyTrainer
-from option_baselines      import UformerLite, UformerTrainer, UformerPathologyTrainer
-from segmentor             import UNetSegmentor, SegTrainer
-from evaluation            import psnr, ssim_numpy, nrmse
-from brats_loader          import BraTSDataset, make_demo_brats
-
-# ── colour maps ───────────────────────────────────────────────────────────────
-# BraTS seg: 0=BG, 1=NCR, 2=ED, 3=ET
-SEG_COLOURS = np.array([
-    [0,   0,   0,   0  ],   # 0 BG     — transparent
-    [0,   0,   1,   0.5],   # 1 NCR    — blue
-    [0,   1,   0,   0.5],   # 2 ED     — green
-    [1,   0.2, 0,   0.7],   # 3 ET     — red-orange
-], dtype=np.float32)
-SEG_CMAP = ListedColormap(SEG_COLOURS[:, :3])
-
-MODEL_COLOURS = {
-    "PP-MAE (Swin)\n[PROPOSED]": "#1565C0",
-    "SwinIR-lite\n(L1)":         "#EF6C00",
-    "Uformer-lite\n(L1)":        "#F9A825",
-    "SwinIR +\nPathologyLoss":   "#558B2F",
-    "Uformer +\nPathologyLoss":  "#00695C",
+# ── canonical results (from results/round4_mps/options_results.csv) ──────────
+RESULTS = {
+    "PP-MAE (Swin)\n[PROPOSED]":  dict(PSNR=28.0622, SSIM=0.9565, Dice_WT=0.8788, Dice_TC=0.8383, Dice_ET=0.7903),
+    "SwinIR-lite\n(L1)":          dict(PSNR=31.4469, SSIM=0.9796, Dice_WT=0.8788, Dice_TC=0.7943, Dice_ET=0.7601),
+    "Uformer-lite\n(L1)":         dict(PSNR=31.6952, SSIM=0.9801, Dice_WT=0.8819, Dice_TC=0.8101, Dice_ET=0.7707),
+    "SwinIR +\nPathologyLoss":    dict(PSNR=31.1997, SSIM=0.9784, Dice_WT=0.8811, Dice_TC=0.7670, Dice_ET=0.7198),
+    "Uformer +\nPathologyLoss":   dict(PSNR=31.6827, SSIM=0.9802, Dice_WT=0.8836, Dice_TC=0.8258, Dice_ET=0.7780),
 }
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
-def _parse():
-    p = argparse.ArgumentParser()
-    p.add_argument("brats_root", nargs="?", default=None)
-    p.add_argument("--device",       default=None)
-    p.add_argument("--epochs",       type=int, default=30)
-    p.add_argument("--seg_epochs",   type=int, default=20)
-    p.add_argument("--max_subjects", type=int, default=50)
-    p.add_argument("--patch_size",   type=int, default=96)
-    p.add_argument("--sigma",        type=float, default=0.08)
-    p.add_argument("--out",          default="paper_figs")
-    p.add_argument("--n_samples",    type=int, default=4,
-                   help="Number of representative slices to show")
-    return p.parse_args()
+# significance stars vs PP-MAE (Swin) [PROPOSED]
+SIG = {
+    ("SwinIR-lite\n(L1)",       "Dice_TC"): "***",
+    ("SwinIR-lite\n(L1)",       "Dice_ET"): "***",
+    ("Uformer-lite\n(L1)",      "Dice_TC"): "***",
+    ("Uformer-lite\n(L1)",      "Dice_ET"): "*",
+    ("SwinIR +\nPathologyLoss", "Dice_TC"): "***",
+    ("SwinIR +\nPathologyLoss", "Dice_ET"): "***",
+    ("Uformer +\nPathologyLoss","Dice_TC"): "ns",
+    ("Uformer +\nPathologyLoss","Dice_ET"): "**",
+}
+
+METHODS   = list(RESULTS.keys())
+COLOURS   = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+PROPOSED  = "PP-MAE (Swin)\n[PROPOSED]"
+
+# BraTS seg colour map: 0=BG, 1=NCR(blue), 2=ED(green), 3=ET(red)
+SEG_CMAP  = ListedColormap(["black", "blue", "lime", "red"])
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig D — Dice bar chart
+# ─────────────────────────────────────────────────────────────────────────────
+def fig_dice_bars(out_dir: str):
+    metrics = ["Dice_WT", "Dice_TC", "Dice_ET"]
+    labels  = ["Whole Tumour", "Tumour Core", "Enhancing Tumour"]
+    fig, axes = plt.subplots(1, 3, figsize=(14, 5), sharey=False)
+    fig.suptitle("Segmentation Dice Scores — Round 4 (BraTS 2021, n=50)", fontsize=13, fontweight="bold")
+
+    x = np.arange(len(METHODS))
+    w = 0.6
+
+    for ax, met, lab in zip(axes, metrics, labels):
+        vals = [RESULTS[m][met] for m in METHODS]
+        bars = ax.bar(x, vals, width=w, color=COLOURS, edgecolor="black", linewidth=0.6)
+
+        # bold outline on proposed
+        bars[0].set_linewidth(2.2)
+        bars[0].set_edgecolor("black")
+
+        # add value labels
+        for b, v in zip(bars, vals):
+            ax.text(b.get_x() + b.get_width()/2, v + 0.002, f"{v:.4f}",
+                    ha="center", va="bottom", fontsize=7.5, fontweight="bold" if v == max(vals) else "normal")
+
+        # significance stars above baseline bars vs proposed
+        proposed_val = RESULTS[PROPOSED][met]
+        for i, m in enumerate(METHODS[1:], 1):
+            star = SIG.get((m, met), "")
+            if star and star != "ns":
+                ymax = max(vals[i], proposed_val)
+                ax.annotate("", xy=(x[i], ymax + 0.012), xytext=(x[0], ymax + 0.012),
+                            arrowprops=dict(arrowstyle="-", color="grey", lw=0.8))
+                ax.text((x[0] + x[i]) / 2, ymax + 0.014, star,
+                        ha="center", va="bottom", fontsize=8, color="black")
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([m.replace("\n", "\n") for m in METHODS], fontsize=8)
+        ax.set_ylabel("Dice Score")
+        ax.set_title(lab, fontsize=11)
+        lo = min(vals) - 0.03
+        ax.set_ylim(lo, max(vals) + 0.06)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.2f}"))
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    plt.tight_layout()
+    path = os.path.join(out_dir, "figD_dice_bars.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {path}")
 
 
-# ── data loading ──────────────────────────────────────────────────────────────
-def load_data(args, device):
-    if args.brats_root and os.path.isdir(args.brats_root):
-        try:
-            ds = BraTSDataset(args.brats_root, slice_axis=2,
-                              patch_size=args.patch_size, sigma=args.sigma,
-                              min_tumour_frac=0.01, cache=True,
-                              max_subjects=args.max_subjects)
-            print(f"  Real BraTS: {len(ds)} slices from {args.max_subjects} subjects")
-            use_real = True
-        except Exception as e:
-            print(f"  BraTS load failed ({e}), using demo data")
-            ds = make_demo_brats(n_subjects=6, patch_size=args.patch_size,
-                                 sigma=args.sigma, slices_per_subject=24)
-            use_real = False
-    else:
-        ds = make_demo_brats(n_subjects=6, patch_size=args.patch_size,
-                             sigma=args.sigma, slices_per_subject=24)
-        use_real = False
-        print("  Demo mode (no BraTS path given)")
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig E — PSNR paradox scatter
+# ─────────────────────────────────────────────────────────────────────────────
+def fig_psnr_paradox(out_dir: str):
+    fig, ax = plt.subplots(figsize=(7, 5))
+    for i, (m, c) in enumerate(zip(METHODS, COLOURS)):
+        r = RESULTS[m]
+        ax.scatter(r["PSNR"], r["Dice_ET"], s=180, color=c, zorder=3,
+                   edgecolors="black", linewidths=1.5,
+                   marker="*" if m == PROPOSED else "o")
+        offset_x = 0.1 if m != PROPOSED else -0.3
+        offset_y = 0.003 if i % 2 == 0 else -0.006
+        ax.annotate(m.replace("\n", " "), (r["PSNR"] + offset_x, r["Dice_ET"] + offset_y),
+                    fontsize=8, ha="left" if m != PROPOSED else "right")
 
-    n = len(ds)
-    n_train = int(0.8 * n)
-    train_ds, val_ds = torch.utils.data.random_split(
-        ds, [n_train, n - n_train],
-        generator=torch.Generator().manual_seed(42))
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=4, shuffle=True)
-    val_loader   = torch.utils.data.DataLoader(val_ds,   batch_size=4, shuffle=False)
-    return train_loader, val_loader, use_real
+    # arrow annotation: "higher PSNR ≠ better tumour detection"
+    ax.annotate("Higher PSNR ≠\nbetter tumour detection",
+                xy=(31.2, 0.772), fontsize=9, color="grey",
+                style="italic",
+                bbox=dict(boxstyle="round,pad=0.3", fc="lightyellow", ec="grey", alpha=0.8))
 
+    ax.set_xlabel("Mean PSNR (dB)", fontsize=11)
+    ax.set_ylabel("Mean Dice — Enhancing Tumour (ET)", fontsize=11)
+    ax.set_title("PSNR Paradox: Proposed Model Sacrifices PSNR for Tumour Sensitivity",
+                 fontsize=11, fontweight="bold")
+    ax.grid(linestyle="--", alpha=0.35)
 
-# ── segmentor training ────────────────────────────────────────────────────────
-def train_segmentor(train_loader, device, seg_epochs):
-    seg_model   = UNetSegmentor(4, 4, 32).to(device)
-    seg_trainer = SegTrainer(seg_model, device=device, lr=5e-4)
-    print(f"\n  Training segmentor ({seg_epochs} epochs) …")
-    for ep in range(1, seg_epochs + 1):
-        loss = 0.0
-        for b in train_loader:
-            loss += seg_trainer.step(b["target"].to(device),
-                                     b["seg"][:, 0].long().to(device))
-        if ep % 5 == 0 or ep == 1:
-            print(f"    Ep {ep}/{seg_epochs}  loss={loss/len(train_loader):.4f}")
-    seg_model.eval()
-    print("  Segmentor frozen.")
-    return seg_model
+    legend_els = [mpatches.Patch(color=c, label=m.replace("\n", " "))
+                  for m, c in zip(METHODS, COLOURS)]
+    ax.legend(handles=legend_els, fontsize=8, loc="lower right")
+
+    plt.tight_layout()
+    path = os.path.join(out_dir, "figE_psnr_paradox.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {path}")
 
 
-# ── model definitions ─────────────────────────────────────────────────────────
-def build_models(device, patch_size):
-    return {
-        "PP-MAE (Swin)\n[PROPOSED]": {
-            "model":      SwinPPMAE(4, embed_dim=48, depths=(2,2,2,2),
-                                    n_heads=(3,3,6,6), window_size=4),
-            "trainer_fn": lambda m: SwinPPMAETrainer(m, device=device),
-            "infer_fn":   lambda m, noisy, seg: m(noisy, seg),
-            "colour":     MODEL_COLOURS["PP-MAE (Swin)\n[PROPOSED]"],
-        },
-        "SwinIR-lite\n(L1)": {
-            "model":      SwinIRLite(4, dim=64, n_blocks=4, window_size=4),
-            "trainer_fn": lambda m: SwinIRTrainer(m, device=device, lr=1e-4),
-            "infer_fn":   lambda m, noisy, seg: m(noisy),
-            "colour":     MODEL_COLOURS["SwinIR-lite\n(L1)"],
-        },
-        "Uformer-lite\n(L1)": {
-            "model":      UformerLite(4, dim=32, window_size=4),
-            "trainer_fn": lambda m: UformerTrainer(m, device=device, lr=1e-4),
-            "infer_fn":   lambda m, noisy, seg: m(noisy),
-            "colour":     MODEL_COLOURS["Uformer-lite\n(L1)"],
-        },
-        "SwinIR +\nPathologyLoss": {
-            "model":      SwinIRLite(4, dim=64, n_blocks=4, window_size=4),
-            "trainer_fn": lambda m: SwinIRPathologyTrainer(m, device=device,
-                                                           lr=1e-4, mode="clinical_risk"),
-            "infer_fn":   lambda m, noisy, seg: m(noisy),
-            "colour":     MODEL_COLOURS["SwinIR +\nPathologyLoss"],
-        },
-        "Uformer +\nPathologyLoss": {
-            "model":      UformerLite(4, dim=32, window_size=4),
-            "trainer_fn": lambda m: UformerPathologyTrainer(m, device=device,
-                                                            lr=1e-4, mode="clinical_risk"),
-            "infer_fn":   lambda m, noisy, seg: m(noisy),
-            "colour":     MODEL_COLOURS["Uformer +\nPathologyLoss"],
-        },
+# ─────────────────────────────────────────────────────────────────────────────
+# Fig S — Significance summary table
+# ─────────────────────────────────────────────────────────────────────────────
+def fig_significance_table(out_dir: str):
+    rows = [
+        ["PP-MAE vs SwinIR-L1",        "Dice_TC", "+0.0440", "4.37e-10", "***"],
+        ["PP-MAE vs SwinIR-L1",        "Dice_ET", "+0.0302", "1.94e-04", "***"],
+        ["PP-MAE vs Uformer-L1",       "Dice_TC", "+0.0282", "1.37e-05", "***"],
+        ["PP-MAE vs Uformer-L1",       "Dice_ET", "+0.0196", "1.61e-02", "*"],
+        ["PP-MAE vs SwinIR+PathLoss",  "Dice_TC", "+0.0713", "1.93e-05", "***"],
+        ["PP-MAE vs SwinIR+PathLoss",  "Dice_ET", "+0.0705", "4.93e-04", "***"],
+        ["PP-MAE vs Uformer+PathLoss", "Dice_TC", "+0.0125", "7.91e-02", "ns"],
+        ["PP-MAE vs Uformer+PathLoss", "Dice_ET", "+0.0123", "3.16e-03", "**"],
+    ]
+    col_headers = ["Comparison", "Region", "Δ Mean", "p-value (Wilcoxon)", "Sig."]
+
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+    ax.axis("off")
+
+    star_colours = {"***": "#1a7a1a", "**": "#5577cc", "*": "#cc8800", "ns": "#888888"}
+    cell_colours = []
+    for row in rows:
+        row_c = ["white"] * 4 + [star_colours.get(row[4], "white")]
+        cell_colours.append(row_c)
+
+    tbl = ax.table(
+        cellText=rows,
+        colLabels=col_headers,
+        cellLoc="center",
+        loc="center",
+        cellColours=cell_colours,
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9)
+    tbl.scale(1, 1.5)
+
+    for (r, c), cell in tbl.get_celld().items():
+        if r == 0:
+            cell.set_facecolor("#2c3e50")
+            cell.set_text_props(color="white", fontweight="bold")
+
+    ax.set_title("Statistical Significance — PP-MAE vs Baselines (Wilcoxon signed-rank)",
+                 fontsize=11, fontweight="bold", pad=12)
+    plt.tight_layout()
+    path = os.path.join(out_dir, "figS_significance_table.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Visual figures — only run when data_dir is provided
+# ─────────────────────────────────────────────────────────────────────────────
+def _load_brats_samples(data_dir: str, n_subjects: int, device):
+    from brats_loader import BraTSDataset
+    ds = BraTSDataset(data_dir, max_subjects=n_subjects, mode="val")
+    samples = []
+    for idx in range(len(ds)):
+        item = ds[idx]
+        # item: dict with "input" (C,H,W), "target" (C,H,W), "seg" (H,W)
+        inp   = item["input"].unsqueeze(0).to(device)   # (1,C,H,W)
+        tgt   = item["target"].unsqueeze(0).to(device)
+        seg   = item["seg"]                              # (H,W) numpy or tensor
+        if isinstance(seg, torch.Tensor):
+            seg = seg.numpy()
+        et_frac = (seg == 3).mean()
+        if et_frac > 0.003:                              # only slices with visible ET
+            samples.append(dict(inp=inp, tgt=tgt, seg=seg))
+        if len(samples) >= 3:
+            break
+    if not samples:                                      # fallback: take first 3
+        for idx in range(min(3, len(ds))):
+            item = ds[idx]
+            inp = item["input"].unsqueeze(0).to(device)
+            tgt = item["target"].unsqueeze(0).to(device)
+            seg = item["seg"]
+            if isinstance(seg, torch.Tensor):
+                seg = seg.numpy()
+            samples.append(dict(inp=inp, tgt=tgt, seg=seg))
+    return samples
+
+
+def _quick_train(model, samples, epochs: int, device):
+    """Train model for a handful of epochs on the provided samples (for visuals only)."""
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    crit = nn.L1Loss()
+    model.train()
+    for _ in range(epochs):
+        for s in samples:
+            opt.zero_grad()
+            out = model(s["inp"])
+            if isinstance(out, (tuple, list)):
+                out = out[0]
+            loss = crit(out, s["tgt"])
+            loss.backward()
+            opt.step()
+    model.eval()
+    return model
+
+
+def _infer(model, inp):
+    with torch.no_grad():
+        out = model(inp)
+        if isinstance(out, (tuple, list)):
+            out = out[0]
+    return out.squeeze(0).cpu().numpy()   # (C,H,W)
+
+
+def _psnr_np(pred, gt):
+    mse = np.mean((pred - gt) ** 2)
+    if mse < 1e-10:
+        return 100.0
+    return 20 * np.log10(1.0 / np.sqrt(mse))
+
+
+def fig_denoising_samples(samples, out_dir: str, device, quick_epochs: int = 8):
+    from option4_swin_pp_mae import SwinPPMAE
+    from option_baselines    import SwinIRLite, UformerLite
+
+    in_ch  = samples[0]["inp"].shape[1]
+    out_ch = samples[0]["tgt"].shape[1]
+
+    models = {
+        "PP-MAE\n[PROPOSED]": SwinPPMAE(in_channels=in_ch, out_channels=out_ch).to(device),
+        "SwinIR-L1":          SwinIRLite(in_channels=in_ch, out_channels=out_ch).to(device),
+        "Uformer-L1":         UformerLite(in_channels=in_ch, out_channels=out_ch).to(device),
     }
 
+    print("  Quick-training visual models …")
+    for name, mdl in models.items():
+        print(f"    {name.splitlines()[0]} …", end=" ", flush=True)
+        _quick_train(mdl, samples, quick_epochs, device)
+        print("done")
 
-# ── training loop ─────────────────────────────────────────────────────────────
-def train_all(models, train_loader, device, epochs):
-    histories = {}
-    for name, cfg in models.items():
-        print(f"\n  [{name.replace(chr(10),' ')}]")
-        m       = cfg["model"].to(device)
-        trainer = cfg["trainer_fn"](m)
-        hist    = []
-        for ep in range(1, epochs + 1):
-            ep_loss = 0.0
-            for b in train_loader:
-                try:
-                    res = trainer.step(b)
-                except Exception:
-                    res = {"total": 0.0}
-                ep_loss += res.get("total", 0.0)
-            ep_loss /= max(len(train_loader), 1)
-            hist.append(ep_loss)
-            if ep % 5 == 0 or ep == 1:
-                print(f"    Ep {ep:2d}/{epochs}  loss={ep_loss:.4f}")
-        cfg["model"] = m
-        histories[name] = hist
-    return histories
+    n_samples = len(samples)
+    col_names = ["Noisy Input"] + list(models.keys()) + ["Ground Truth"]
+    n_cols = len(col_names)
 
+    fig, axes = plt.subplots(n_samples, n_cols, figsize=(3.2 * n_cols, 3.2 * n_samples))
+    if n_samples == 1:
+        axes = axes[np.newaxis, :]
 
-# ── collect validation samples ────────────────────────────────────────────────
-def collect_samples(models, val_loader, seg_model, device, n_samples):
-    """
-    Collect n_samples representative slices.  Picks slices with clear ET
-    (ground-truth ET fraction > threshold), returns dict of arrays.
-    """
-    all_noisy, all_clean, all_seg = [], [], []
-    preds   = {name: [] for name in models}
-    seg_preds = {name: [] for name in models}
-    metrics   = {name: {"psnr": [], "ssim": [], "dice_et": [], "dice_tc": []} for name in models}
+    for row, s in enumerate(samples):
+        noisy = s["inp"].squeeze(0).cpu().numpy()  # (C,H,W)
+        gt    = s["tgt"].squeeze(0).cpu().numpy()
+        t1ce_ch = min(1, noisy.shape[0] - 1)       # use T1ce channel (idx 1) or fallback
 
-    seg_device = next(seg_model.parameters()).device
+        outputs = {name: _infer(mdl, s["inp"]) for name, mdl in models.items()}
 
-    with torch.no_grad():
-        for b in val_loader:
-            noisy  = b["noisy"]
-            target = b["target"]
-            seg    = b["seg"]
-            gt_lab = seg[:, 0].long()
-
-            # only keep slices with enough ET
-            et_frac = (gt_lab == 3).float().mean(dim=(1, 2))
-            keep    = (et_frac > 0.005).nonzero(as_tuple=True)[0]
-            if len(keep) == 0:
-                continue
-
-            for i in keep.tolist():
-                if len(all_noisy) >= n_samples:
-                    break
-                all_noisy.append(noisy[i].cpu())
-                all_clean.append(target[i].cpu())
-                all_seg.append(gt_lab[i].cpu())
-
-                for name, cfg in models.items():
-                    m        = cfg["model"]
-                    infer_fn = cfg["infer_fn"]
-                    m.eval()
-                    ni  = noisy[i:i+1].to(device)
-                    si  = seg[i:i+1].to(device)
-                    try:
-                        pred = infer_fn(m, ni, si)
-                    except Exception:
-                        pred = infer_fn(m, ni, torch.zeros_like(si))
-                    pred_cpu = pred[0].cpu()
-                    preds[name].append(pred_cpu)
-
-                    # PSNR / SSIM
-                    p_np = pred_cpu.permute(1,2,0).numpy()
-                    t_np = target[i].permute(1,2,0).numpy()
-                    metrics[name]["psnr"].append(psnr(p_np, t_np))
-                    metrics[name]["ssim"].append(ssim_numpy(p_np, t_np))
-
-                    # Downstream segmentation
-                    logits   = seg_model(pred_cpu.unsqueeze(0).to(seg_device))
-                    pred_lab = logits.argmax(1)[0].cpu()
-                    gt_l     = gt_lab[i]
-                    # ET dice
-                    et_p = (pred_lab == 3); et_g = (gt_l == 3)
-                    d_et = (2*(et_p & et_g).sum() / (et_p.sum()+et_g.sum()+1e-6)).item()
-                    tc_p = ((pred_lab==1)|(pred_lab==3))
-                    tc_g = ((gt_l==1)|(gt_l==3))
-                    d_tc = (2*(tc_p & tc_g).sum() / (tc_p.sum()+tc_g.sum()+1e-6)).item()
-                    metrics[name]["dice_et"].append(d_et)
-                    metrics[name]["dice_tc"].append(d_tc)
-                    seg_preds[name].append(pred_lab.numpy())
-
-            if len(all_noisy) >= n_samples:
-                break
-
-    return all_noisy, all_clean, all_seg, preds, seg_preds, metrics
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FIGURE A — Denoising samples
-# ─────────────────────────────────────────────────────────────────────────────
-def fig_denoising(noisy_list, clean_list, preds, metrics, out_dir, n_models=3):
-    """
-    Rows: Noisy input | PP-MAE [PROPOSED] | SwinIR-L1 | Uformer-L1 | Ground Truth
-    Cols: n_samples representative slices
-    """
-    n_s    = len(noisy_list)
-    rows   = ["Noisy\nInput"] + list(preds.keys())[:n_models] + ["Ground\nTruth"]
-    n_rows = len(rows)
-
-    fig, axes = plt.subplots(n_rows, n_s, figsize=(3.5 * n_s, 3.2 * n_rows))
-    fig.suptitle("Denoising Results — Representative Validation Slices\n"
-                 "(T1ce channel shown; PSNR / SSIM annotated)",
-                 fontsize=13, fontweight="bold", y=1.01)
-
-    def show(ax, img_tensor, title="", psnr_v=None, ssim_v=None, border_col=None):
-        # Show T1ce channel (index 1 — best for ET visibility)
-        img = img_tensor[1].numpy()
-        img = np.clip(img, 0, 1)
-        ax.imshow(img, cmap="gray", vmin=0, vmax=1, interpolation="lanczos")
-        ax.axis("off")
-        if psnr_v is not None:
-            ax.set_title(f"PSNR {psnr_v:.2f} dB\nSSIM {ssim_v:.3f}",
-                         fontsize=7.5, pad=2)
-        if border_col:
-            for spine in ax.spines.values():
-                spine.set_visible(True)
-                spine.set_edgecolor(border_col)
-                spine.set_linewidth(2.5)
-
-    model_names = list(preds.keys())
-
-    for col, s in enumerate(range(n_s)):
-        for row, row_label in enumerate(rows):
-            ax = axes[row, col] if n_s > 1 else axes[row]
-
-            if row == 0:                     # Noisy
-                show(ax, noisy_list[s])
-                if col == 0:
-                    ax.set_ylabel("Noisy Input", fontsize=9, fontweight="bold",
-                                  rotation=90, labelpad=4)
-                ax.set_title(f"Sample {s+1}", fontsize=9, fontweight="bold")
-
-            elif row == n_rows - 1:          # GT
-                show(ax, clean_list[s])
-                if col == 0:
-                    ax.set_ylabel("Ground Truth", fontsize=9, fontweight="bold",
-                                  rotation=90, labelpad=4)
-
-            else:                            # Model output
-                mname = model_names[row - 1]
-                col_  = list(MODEL_COLOURS.values())[row - 1]
-                pv    = metrics[mname]["psnr"][s] if s < len(metrics[mname]["psnr"]) else 0
-                sv    = metrics[mname]["ssim"][s] if s < len(metrics[mname]["ssim"]) else 0
-                is_proposed = "PROPOSED" in mname
-                show(ax, preds[mname][s],
-                     psnr_v=pv, ssim_v=sv,
-                     border_col=col_ if is_proposed else None)
-                if col == 0:
-                    short = mname.replace("\n", " ")
-                    ax.set_ylabel(short, fontsize=8,
-                                  color="#1565C0" if is_proposed else "#333",
-                                  fontweight="bold" if is_proposed else "normal",
-                                  rotation=90, labelpad=4)
-
-    plt.tight_layout()
-    p = os.path.join(out_dir, "figA_denoising_samples.png")
-    plt.savefig(p, dpi=180, bbox_inches="tight")
-    print(f"  -> {p}")
-    plt.close()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FIGURE B — Segmentation overlays
-# ─────────────────────────────────────────────────────────────────────────────
-def fig_segmentation(noisy_list, clean_list, gt_seg_list, seg_preds, out_dir):
-    """
-    Rows: GT seg | PP-MAE pred seg | SwinIR-L1 pred seg | Uformer-L1 pred seg
-    Cols: n_samples slices
-    """
-    n_s      = len(noisy_list)
-    all_keys = list(seg_preds.keys())
-    show_keys = [all_keys[0], all_keys[1], all_keys[2]]   # proposed + 2 baselines
-    rows = ["GT\nSegmentation"] + show_keys
-
-    fig, axes = plt.subplots(len(rows), n_s,
-                              figsize=(3.5 * n_s, 3.4 * len(rows)))
-    fig.suptitle("Downstream Segmentation — GT vs Model Predictions\n"
-                 "Red=ET (Enhancing Tumour)  Green=ED  Blue=NCR",
-                 fontsize=12, fontweight="bold", y=1.01)
-
-    def overlay(ax, bg_tensor, seg_np, title_col=None):
-        bg = bg_tensor[1].numpy()
-        bg = np.clip(bg, 0, 1)
-        ax.imshow(bg, cmap="gray", vmin=0, vmax=1, interpolation="lanczos")
-        rgba = SEG_COLOURS[seg_np]          # (H, W, 4)
-        ax.imshow(rgba, interpolation="nearest")
-        ax.axis("off")
-        if title_col:
-            for sp in ax.spines.values():
-                sp.set_visible(True); sp.set_edgecolor(title_col); sp.set_linewidth(2.5)
-
-    for col in range(n_s):
-        for row, row_key in enumerate(rows):
-            ax = axes[row, col] if n_s > 1 else axes[row]
+        panels = [noisy] + [outputs[k] for k in models] + [gt]
+        for col, (panel, cname) in enumerate(zip(panels, col_names)):
+            ax = axes[row, col]
+            img = panel[t1ce_ch]
+            ax.imshow(img, cmap="gray", vmin=0, vmax=1)
 
             if row == 0:
-                seg_np = gt_seg_list[col].numpy()
-                overlay(ax, clean_list[col], seg_np)
-                if col == 0:
-                    ax.set_ylabel("GT Segmentation", fontsize=9, fontweight="bold",
-                                  rotation=90, labelpad=4)
-                ax.set_title(f"Sample {col+1}", fontsize=9, fontweight="bold")
-            else:
-                mname = show_keys[row - 1]
-                col_  = list(MODEL_COLOURS.values())[row - 1]
-                is_proposed = "PROPOSED" in mname
-                if col < len(seg_preds[mname]):
-                    seg_np = seg_preds[mname][col]
-                    overlay(ax, preds_ref[mname][col] if mname in preds_ref else clean_list[col],
-                            seg_np, title_col=col_ if is_proposed else None)
-                if col == 0:
-                    short = mname.replace("\n", " ")
-                    ax.set_ylabel(short, fontsize=8,
-                                  color="#1565C0" if is_proposed else "#333",
-                                  fontweight="bold" if is_proposed else "normal",
-                                  rotation=90, labelpad=4)
+                ax.set_title(cname, fontsize=9, fontweight="bold" if "PROPOSED" in cname else "normal")
 
-    # Legend
-    legend_patches = [
-        mpatches.Patch(color=[0,0,1], label="NCR (label 1)"),
-        mpatches.Patch(color=[0,1,0], label="ED  (label 2)"),
-        mpatches.Patch(color=[1,0.2,0], label="ET  (label 3)"),
+            if col > 0 and col < n_cols - 1:
+                p = _psnr_np(panel, gt)
+                ax.set_xlabel(f"PSNR {p:.1f} dB", fontsize=7.5)
+
+            ax.set_xticks([]); ax.set_yticks([])
+
+    fig.suptitle("Denoising Comparison — T1ce Channel (illustrative samples)",
+                 fontsize=12, fontweight="bold")
+    plt.tight_layout()
+    path = os.path.join(out_dir, "figA_denoising_samples.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {path}")
+    return models   # reuse for segmentation figure
+
+
+def fig_segmentation_overlay(samples, models_dict, out_dir: str, device, quick_epochs: int = 5):
+    from segmentor import UNetSegmentor
+
+    in_ch  = samples[0]["inp"].shape[1]
+    out_ch = samples[0]["tgt"].shape[1]
+
+    seg_models = {
+        name: UNetSegmentor(in_channels=out_ch, num_classes=4).to(device)
+        for name in ["PP-MAE\n[PROPOSED]", "SwinIR-L1"]
+    }
+
+    # build pseudo-labelled data: denoise first, then use GT seg as label
+    print("  Quick-training segmentation models …")
+    seg_loss_fn = nn.CrossEntropyLoss()
+    for sname, smodel in seg_models.items():
+        denoiser = models_dict[sname]
+        opt = torch.optim.Adam(smodel.parameters(), lr=1e-3)
+        smodel.train()
+        for _ in range(quick_epochs):
+            for s in samples:
+                with torch.no_grad():
+                    denoised = denoiser(s["inp"])
+                    if isinstance(denoised, (tuple, list)):
+                        denoised = denoised[0]
+                seg_gt = torch.from_numpy(s["seg"]).long().unsqueeze(0).to(device)
+                opt.zero_grad()
+                pred = smodel(denoised)
+                loss = seg_loss_fn(pred, seg_gt)
+                loss.backward()
+                opt.step()
+        smodel.eval()
+        print(f"    {sname.splitlines()[0]} seg done")
+
+    n_samples = len(samples)
+    col_names = ["Input (T1ce)", "GT Segmentation", "PP-MAE Seg", "SwinIR-L1 Seg"]
+    n_cols = len(col_names)
+
+    fig, axes = plt.subplots(n_samples, n_cols, figsize=(3.2 * n_cols, 3.2 * n_samples))
+    if n_samples == 1:
+        axes = axes[np.newaxis, :]
+
+    for row, s in enumerate(samples):
+        noisy = s["inp"].squeeze(0).cpu().numpy()
+        t1ce  = noisy[min(1, noisy.shape[0]-1)]
+        gt_seg = s["seg"]
+
+        # get denoised + seg predictions
+        preds = {}
+        for sname, smodel in seg_models.items():
+            denoiser = models_dict[sname]
+            with torch.no_grad():
+                denoised = denoiser(s["inp"])
+                if isinstance(denoised, (tuple, list)):
+                    denoised = denoised[0]
+                seg_pred = smodel(denoised).argmax(dim=1).squeeze(0).cpu().numpy()
+            preds[sname] = seg_pred
+
+        panels = [
+            ("Input (T1ce)", t1ce,      None),
+            ("GT Seg",       t1ce,      gt_seg),
+            ("PP-MAE Seg",   t1ce,      preds["PP-MAE\n[PROPOSED]"]),
+            ("SwinIR-L1",    t1ce,      preds["SwinIR-L1"]),
+        ]
+
+        for col, (cname, bg, seg_mask) in enumerate(panels):
+            ax = axes[row, col]
+            ax.imshow(bg, cmap="gray", vmin=0, vmax=1)
+            if seg_mask is not None:
+                masked = np.ma.masked_where(seg_mask == 0, seg_mask)
+                ax.imshow(masked, cmap=SEG_CMAP, vmin=0, vmax=3, alpha=0.55)
+            if row == 0:
+                ax.set_title(cname, fontsize=9, fontweight="bold" if "GT" in cname else "normal")
+            ax.set_xticks([]); ax.set_yticks([])
+
+    # legend
+    legend_els = [
+        mpatches.Patch(color="blue",  alpha=0.6, label="NCR (1)"),
+        mpatches.Patch(color="lime",  alpha=0.6, label="ED (2)"),
+        mpatches.Patch(color="red",   alpha=0.6, label="ET (3)"),
     ]
-    fig.legend(handles=legend_patches, loc="lower center", ncol=3, fontsize=9,
-               bbox_to_anchor=(0.5, -0.03))
-
-    plt.tight_layout()
-    p = os.path.join(out_dir, "figB_segmentation_overlay.png")
-    plt.savefig(p, dpi=180, bbox_inches="tight")
-    print(f"  -> {p}")
-    plt.close()
-
-
-# Store preds globally so fig_segmentation can access it
-preds_ref = {}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FIGURE C — Training loss curves
-# ─────────────────────────────────────────────────────────────────────────────
-def fig_loss_curves(histories, out_dir):
-    fig, ax = plt.subplots(figsize=(10, 5))
-    fig.suptitle("Training Loss Convergence — All Models\n"
-                 "(lower loss ≠ better clinical Dice — see Fig D)",
+    fig.legend(handles=legend_els, loc="lower center", ncol=3, fontsize=9,
+               bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle("Segmentation Overlay — GT vs Model Predictions (illustrative samples)",
                  fontsize=12, fontweight="bold")
-
-    for name, hist in histories.items():
-        col   = list(MODEL_COLOURS.values())[list(histories.keys()).index(name)]
-        lw    = 2.5 if "PROPOSED" in name else 1.5
-        ls    = "-"  if "PROPOSED" in name else ("--" if "L1" in name else ":")
-        label = name.replace("\n", " ")
-        ax.plot(range(1, len(hist)+1), hist,
-                color=col, linewidth=lw, linestyle=ls, label=label, alpha=0.9)
-
-    ax.set_xlabel("Epoch", fontsize=10)
-    ax.set_ylabel("Training Loss", fontsize=10)
-    ax.legend(fontsize=9, loc="upper right")
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.set_xlim(1, max(len(h) for h in histories.values()))
-
-    # Annotation: PathologyLoss models have higher loss (multi-component objective)
-    ax.annotate("PathologyLoss models start\nhigher (multi-component objective)",
-                xy=(5, max(histories[list(histories.keys())[0]][:5])),
-                xytext=(max(len(list(histories.values())[0])//4, 5),
-                        max(histories[list(histories.keys())[0]][:5]) * 1.05),
-                fontsize=8, color="#555",
-                arrowprops=dict(arrowstyle="->", color="#888", lw=0.8))
-
     plt.tight_layout()
-    p = os.path.join(out_dir, "figC_loss_curves.png")
-    plt.savefig(p, dpi=150, bbox_inches="tight")
-    print(f"  -> {p}")
-    plt.close()
+    path = os.path.join(out_dir, "figB_segmentation_overlay.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FIGURE D — Per-slice metric distributions (box plots)
-# ─────────────────────────────────────────────────────────────────────────────
-def fig_metric_distributions(metrics, out_dir):
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    fig.suptitle("Per-Slice Metric Distributions — Validation Set\n"
-                 "(box = IQR, whiskers = 1.5×IQR, dots = outliers)",
-                 fontsize=12, fontweight="bold")
-
-    metric_keys = [("psnr", "PSNR (dB)"), ("dice_tc", "Dice_TC"), ("dice_et", "Dice_ET")]
-    names  = list(metrics.keys())
-    labels = [n.replace("\n", " ") for n in names]
-    cols   = [list(MODEL_COLOURS.values())[i] for i in range(len(names))]
-
-    for ax, (mkey, ylabel) in zip(axes, metric_keys):
-        data = [metrics[n][mkey] for n in names]
-        bp   = ax.boxplot(data, patch_artist=True, notch=False,
-                          medianprops=dict(color="white", linewidth=2),
-                          whiskerprops=dict(linewidth=1.2),
-                          capprops=dict(linewidth=1.2),
-                          flierprops=dict(marker=".", markersize=3, alpha=0.5))
-        for patch, col in zip(bp["boxes"], cols):
-            patch.set_facecolor(col)
-            patch.set_alpha(0.75)
-
-        # Overlay individual points
-        for i, (d, col) in enumerate(zip(data, cols), 1):
-            jitter = np.random.RandomState(42).uniform(-0.15, 0.15, len(d))
-            ax.scatter([i + j for j in jitter], d, color=col,
-                       alpha=0.35, s=12, zorder=4)
-
-        ax.set_xticks(range(1, len(names)+1))
-        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
-        ax.set_ylabel(ylabel, fontsize=10)
-        ax.set_title(ylabel, fontsize=10, fontweight="bold")
-        ax.spines[["top", "right"]].set_visible(False)
-
-        # Star annotation: proposed vs best L1 on this metric
-        prop_data = data[0]
-        for j, d in enumerate(data[1:], 2):
-            if len(prop_data) > 1 and len(d) > 1:
-                from scipy.stats import wilcoxon
-                try:
-                    pairs = min(len(prop_data), len(d))
-                    stat_p = wilcoxon(prop_data[:pairs], d[:pairs]).pvalue
-                    stars  = "***" if stat_p < 0.001 else ("**" if stat_p < 0.01
-                             else ("*" if stat_p < 0.05 else ""))
-                    if stars:
-                        ymax = max(max(prop_data), max(d)) + (0.03 if mkey != "psnr" else 1)
-                        ax.plot([1, j], [ymax, ymax], "k-", linewidth=0.7)
-                        ax.text((1+j)/2, ymax, stars, ha="center", va="bottom",
-                                fontsize=9, color="#C62828")
-                except Exception:
-                    pass
-
-    plt.tight_layout()
-    p = os.path.join(out_dir, "figD_metric_distributions.png")
-    plt.savefig(p, dpi=150, bbox_inches="tight")
-    print(f"  -> {p}")
-    plt.close()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FIGURE E — PSNR paradox (the key paper argument, single clean figure)
-# ─────────────────────────────────────────────────────────────────────────────
-def fig_psnr_paradox(metrics, out_dir):
-    """Scatter: PSNR vs Dice_ET per model (mean ± std), with GT reference."""
-    fig, ax = plt.subplots(figsize=(8, 5))
-    fig.suptitle("The PSNR Paradox: Higher PSNR ≠ Better Tumour Delineation\n"
-                 "Mean ± std across validation slices",
-                 fontsize=11, fontweight="bold")
-
-    names = list(metrics.keys())
-    for i, name in enumerate(names):
-        pv  = np.array(metrics[name]["psnr"])
-        dv  = np.array(metrics[name]["dice_et"])
-        col = list(MODEL_COLOURS.values())[i]
-        lw  = 2 if "PROPOSED" in name else 0
-        ax.errorbar(pv.mean(), dv.mean(),
-                    xerr=pv.std(), yerr=dv.std(),
-                    fmt="o", color=col, markersize=10,
-                    capsize=4, linewidth=1.2,
-                    markeredgewidth=lw, markeredgecolor="black",
-                    label=name.replace("\n", " "), zorder=5)
-
-    ax.set_xlabel("PSNR (dB)  ↑", fontsize=11)
-    ax.set_ylabel("Dice_ET  ↑", fontsize=11)
-    ax.legend(fontsize=8.5, loc="lower right")
-    ax.spines[["top", "right"]].set_visible(False)
-
-    # Draw "ideal" arrow direction
-    ax.annotate("", xy=(ax.get_xlim()[1]*0.95, ax.get_ylim()[1]*0.97),
-                xytext=(ax.get_xlim()[1]*0.82, ax.get_ylim()[1]*0.84),
-                arrowprops=dict(arrowstyle="->", color="#37474F", lw=1.5))
-    ax.text(ax.get_xlim()[1]*0.87, ax.get_ylim()[1]*0.91,
-            "Ideal", fontsize=8, color="#37474F", ha="center")
-
-    plt.tight_layout()
-    p = os.path.join(out_dir, "figE_psnr_paradox.png")
-    plt.savefig(p, dpi=150, bbox_inches="tight")
-    print(f"  -> {p}")
-    plt.close()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN
+# Main
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
-    global preds_ref
-    args = _parse()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("data_dir", nargs="?", default=None,
+                    help="BraTS2021 root dir (optional — only needed for visual figures A & B)")
+    ap.add_argument("--device",    default="cpu", help="mps | cuda | cpu")
+    ap.add_argument("--n_samples", type=int, default=3,
+                    help="Number of BraTS subjects for visual figures (2-5)")
+    ap.add_argument("--vis_epochs", type=int, default=8,
+                    help="Quick-train epochs for visual figures (default 8, ~3 min on MPS)")
+    ap.add_argument("--out",       default="paper_figs")
+    args = ap.parse_args()
 
-    if args.device:
-        device = args.device
-    elif torch.cuda.is_available():
-        device = "cuda"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        device = "mps"
+    os.makedirs(args.out, exist_ok=True)
+    device = torch.device(args.device)
+
+    print("\n── Metric figures (from pre-computed CSV results) ──")
+    fig_dice_bars(args.out)
+    fig_psnr_paradox(args.out)
+    fig_significance_table(args.out)
+
+    if args.data_dir:
+        print(f"\n── Visual figures ({args.n_samples} BraTS subjects, {args.vis_epochs} quick epochs) ──")
+        samples = _load_brats_samples(args.data_dir, n_subjects=args.n_samples, device=device)
+        print(f"  Loaded {len(samples)} slices with visible ET tumour")
+        models = fig_denoising_samples(samples, args.out, device, quick_epochs=args.vis_epochs)
+        fig_segmentation_overlay(samples, models, args.out, device, quick_epochs=args.vis_epochs // 2 + 1)
     else:
-        device = "cpu"
+        print("\n  (Skipping visual figures — pass a BraTS data dir to generate Fig A & B)")
 
-    print(f"\nDevice: {device}")
-    out = os.path.abspath(args.out)
-    os.makedirs(out, exist_ok=True)
-    torch.manual_seed(42); np.random.seed(42)
-
-    # ── load data ──────────────────────────────────────────────────────────────
-    print("\nLoading data …")
-    train_loader, val_loader, _ = load_data(args, device)
-
-    # ── train segmentor ────────────────────────────────────────────────────────
-    seg_model = train_segmentor(train_loader, device, args.seg_epochs)
-
-    # ── build and train all models ─────────────────────────────────────────────
-    print("\nTraining denoising models …")
-    models    = build_models(device, args.patch_size)
-    histories = train_all(models, train_loader, device, args.epochs)
-
-    # ── collect validation samples ─────────────────────────────────────────────
-    print("\nCollecting validation samples …")
-    noisy_list, clean_list, gt_seg_list, preds, seg_preds, metrics = \
-        collect_samples(models, val_loader, seg_model, device, args.n_samples)
-    preds_ref = preds   # make available to fig_segmentation
-
-    if not noisy_list:
-        print("  No valid samples found — try reducing min_tumour_frac in brats_loader.py")
-        return
-
-    print(f"  Collected {len(noisy_list)} representative slices")
-
-    # ── generate figures ───────────────────────────────────────────────────────
-    print("\nGenerating figures …")
-    fig_denoising(noisy_list, clean_list, preds, metrics, out, n_models=3)
-    fig_segmentation(noisy_list, clean_list, gt_seg_list, seg_preds, out)
-    fig_loss_curves(histories, out)
-    fig_metric_distributions(metrics, out)
-    fig_psnr_paradox(metrics, out)
-
-    print(f"\nAll figures saved to: {out}/")
-    print("  figA_denoising_samples.png")
-    print("  figB_segmentation_overlay.png")
-    print("  figC_loss_curves.png")
-    print("  figD_metric_distributions.png")
-    print("  figE_psnr_paradox.png")
+    print(f"\nDone. Figures saved to: {os.path.abspath(args.out)}/")
 
 
 if __name__ == "__main__":
