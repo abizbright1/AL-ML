@@ -111,7 +111,7 @@ SHORT = {
 PROPOSED = "PP-MAE (Swin) [PROPOSED]"
 
 # significance stars lookup: (baseline, metric) → star
-SIG_LOOKUP = {(r[1], r[2]): r[8] for r in SIGNIFICANCE}
+SIG_LOOKUP = {(r[1], r[2]): r[7] for r in SIGNIFICANCE}
 
 SEG_CMAP = ListedColormap(["black", "blue", "lime", "red"])
 
