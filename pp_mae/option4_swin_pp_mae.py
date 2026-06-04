@@ -393,7 +393,14 @@ class SaliencyFeatureReweighter(nn.Module):
 class SwinDecoderStage(nn.Module):
     def __init__(self, in_ch: int, skip_ch: int, out_ch: int):
         super().__init__()
-        self.up    = nn.ConvTranspose2d(in_ch, in_ch // 2, 2, stride=2)
+        # NOTE: nn.ConvTranspose2d has a broken backward pass on Apple MPS
+        # (ConvolutionBackward0 crash).  Upsample + Conv2d is mathematically
+        # equivalent for 2x upsampling and runs correctly on MPS GPU, so the
+        # proposed model no longer falls back to CPU.
+        self.up = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv2d(in_ch, in_ch // 2, kernel_size=3, padding=1),
+        )
         self.merge = nn.Linear(in_ch // 2 + skip_ch, out_ch)
         self.norm  = _SafeLayerNorm(out_ch)
         self.swin  = SwinBlock(out_ch, max(1, out_ch // 32))
@@ -483,9 +490,11 @@ class SwinPPMAE(nn.Module):
                 )
             )
 
-        # Final upsampling × 4 to match input resolution
+        # Final upsampling × 4 to match input resolution.
+        # Upsample + Conv2d instead of ConvTranspose2d (MPS backward bug).
         self.final_up = nn.Sequential(
-            nn.ConvTranspose2d(rev_dims[-1], rev_dims[-1], 4, stride=4),
+            nn.Upsample(scale_factor=4, mode='nearest'),
+            nn.Conv2d(rev_dims[-1], rev_dims[-1], kernel_size=3, padding=1),
             nn.GELU(),
             nn.Conv2d(rev_dims[-1], in_ch, 1),
         )
