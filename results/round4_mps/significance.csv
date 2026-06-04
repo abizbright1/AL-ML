@@ -1,0 +1,13 @@
+Round,Proposed,Baseline,Region,Mean_Proposed,Mean_Baseline,Delta,p_value,Significance
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],SwinIR-lite (L1),Dice_WT,0.8788,0.8788,-0.0000,0.000917301,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],SwinIR-lite (L1),Dice_TC,0.8383,0.7943,+0.0440,4.36646e-10,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],SwinIR-lite (L1),Dice_ET,0.7903,0.7601,+0.0302,0.000194001,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],Uformer-lite (L1),Dice_WT,0.8788,0.8819,-0.0031,0.00420755,**
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],Uformer-lite (L1),Dice_TC,0.8383,0.8101,+0.0282,1.37206e-05,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],Uformer-lite (L1),Dice_ET,0.7903,0.7707,+0.0196,0.0160566,*
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],SwinIR + PathologyLoss,Dice_WT,0.8788,0.8811,-0.0023,1.5702e-08,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],SwinIR + PathologyLoss,Dice_TC,0.8383,0.7670,+0.0713,1.9291e-05,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],SwinIR + PathologyLoss,Dice_ET,0.7903,0.7198,+0.0705,0.000492885,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],Uformer + PathologyLoss,Dice_WT,0.8788,0.8836,-0.0048,0.000572123,***
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],Uformer + PathologyLoss,Dice_TC,0.8383,0.8258,+0.0125,0.0790626,ns
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],Uformer + PathologyLoss,Dice_ET,0.7903,0.7780,+0.0123,0.00315823,**

@@ -1,6 +1,6 @@
-Round,Method,PSNR,SSIM,Dice_WT,Dice_TC,Dice_ET
-Round 4 — Swin,PP-MAE (Swin) [PROPOSED],28.06,0.957,0.879,0.838,0.790
-Round 4 — Swin,SwinIR-lite (L1),31.45,0.980,0.879,0.794,0.760
-Round 4 — Swin,Uformer-lite (L1),31.70,0.980,0.882,0.810,0.771
-Round 4 — Swin,SwinIR + PathologyLoss,31.20,0.978,0.881,0.767,0.720
-Round 4 — Swin,Uformer + PathologyLoss,31.68,0.980,0.884,0.826,0.778
+Round,Method,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET
+Round 4 — Swin,PP-MAE (Swin) [PROPOSED],28.0622,0.9565,0.1369,0.8788,0.8383,0.7903
+Round 4 — Swin,SwinIR-lite (L1),31.4469,0.9796,0.0918,0.8788,0.7943,0.7601
+Round 4 — Swin,Uformer-lite (L1),31.6952,0.9801,0.0900,0.8819,0.8101,0.7707
+Round 4 — Swin,SwinIR + PathologyLoss,31.1997,0.9784,0.0942,0.8811,0.7670,0.7198
+Round 4 — Swin,Uformer + PathologyLoss,31.6827,0.9802,0.0899,0.8836,0.8258,0.7780

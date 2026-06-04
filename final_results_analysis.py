@@ -24,11 +24,11 @@ MPS_DATA = {
                 "Uformer-lite\n(L1)",
                 "SwinIR +\nPathologyLoss",
                 "Uformer +\nPathologyLoss"],
-    "PSNR":    [28.06, 31.45, 31.70, 31.20, 31.68],
-    "SSIM":    [0.957,  0.980,  0.980,  0.978,  0.980],
-    "Dice_WT": [0.879,  0.879,  0.882,  0.881,  0.884],
-    "Dice_TC": [0.838,  0.794,  0.810,  0.767,  0.826],
-    "Dice_ET": [0.790,  0.760,  0.771,  0.720,  0.778],
+    "PSNR":    [28.0622, 31.4469, 31.6952, 31.1997, 31.6827],
+    "SSIM":    [0.9565,  0.9796,  0.9801,  0.9784,  0.9802],
+    "Dice_WT": [0.8788,  0.8788,  0.8819,  0.8811,  0.8836],
+    "Dice_TC": [0.8383,  0.7943,  0.8101,  0.7670,  0.8258],
+    "Dice_ET": [0.7903,  0.7601,  0.7707,  0.7198,  0.7780],
     "Cat":     ["proposed", "l1", "l1", "pathloss", "pathloss"],
 }
 
@@ -181,16 +181,16 @@ def fig_significance(out_dir: str):
 
     # p-values from run output
     pvals = {
-        "SwinIR-lite\n(L1)":        {"Dice_WT": 0.0009173, "Dice_TC": 4.366e-10, "Dice_ET": 0.000194},
-        "Uformer-lite\n(L1)":       {"Dice_WT": 0.004208,  "Dice_TC": 1.372e-5,  "Dice_ET": 0.01606},
-        "SwinIR +\nPathologyLoss":  {"Dice_WT": 1.57e-8,   "Dice_TC": 1.929e-5,  "Dice_ET": 0.0004929},
-        "Uformer +\nPathologyLoss": {"Dice_WT": 0.0005721, "Dice_TC": 0.07906,   "Dice_ET": 0.003158},
+        "SwinIR-lite\n(L1)":        {"Dice_WT": 9.173e-4,  "Dice_TC": 4.36646e-10, "Dice_ET": 1.94001e-4},
+        "Uformer-lite\n(L1)":       {"Dice_WT": 4.20755e-3, "Dice_TC": 1.37206e-5,  "Dice_ET": 1.60566e-2},
+        "SwinIR +\nPathologyLoss":  {"Dice_WT": 1.5702e-8,  "Dice_TC": 1.9291e-5,   "Dice_ET": 4.92885e-4},
+        "Uformer +\nPathologyLoss": {"Dice_WT": 5.72123e-4, "Dice_TC": 7.90626e-2,  "Dice_ET": 3.15823e-3},
     }
     dvals = {
-        "SwinIR-lite\n(L1)":        {"Dice_WT": -0.000, "Dice_TC": +0.044, "Dice_ET": +0.030},
-        "Uformer-lite\n(L1)":       {"Dice_WT": -0.003, "Dice_TC": +0.028, "Dice_ET": +0.020},
-        "SwinIR +\nPathologyLoss":  {"Dice_WT": -0.002, "Dice_TC": +0.071, "Dice_ET": +0.071},
-        "Uformer +\nPathologyLoss": {"Dice_WT": -0.005, "Dice_TC": +0.012, "Dice_ET": +0.012},
+        "SwinIR-lite\n(L1)":        {"Dice_WT": -0.0000, "Dice_TC": +0.0440, "Dice_ET": +0.0302},
+        "Uformer-lite\n(L1)":       {"Dice_WT": -0.0031, "Dice_TC": +0.0282, "Dice_ET": +0.0196},
+        "SwinIR +\nPathologyLoss":  {"Dice_WT": -0.0023, "Dice_TC": +0.0713, "Dice_ET": +0.0705},
+        "Uformer +\nPathologyLoss": {"Dice_WT": -0.0048, "Dice_TC": +0.0125, "Dice_ET": +0.0123},
     }
 
     def stars(p):
@@ -260,11 +260,11 @@ def print_report():
   ┌─────────────────────────────┬───────┬───────┬─────────┬─────────┬─────────┐
   │ Method                      │  PSNR │  SSIM │ Dice_WT │ Dice_TC │ Dice_ET │
   ├─────────────────────────────┼───────┼───────┼─────────┼─────────┼─────────┤
-  │ PP-MAE (Swin) [PROPOSED] ★  │ 28.06 │ 0.957 │  0.879  │  0.838  │  0.790  │ ← BEST TC & ET
-  │ SwinIR-lite (L1)            │ 31.45 │ 0.980 │  0.879  │  0.794  │  0.760  │
-  │ Uformer-lite (L1)           │ 31.70 │ 0.980 │  0.882  │  0.810  │  0.771  │
-  │ SwinIR + PathologyLoss      │ 31.20 │ 0.978 │  0.881  │  0.767  │  0.720  │
-  │ Uformer + PathologyLoss     │ 31.68 │ 0.980 │  0.884  │  0.826  │  0.778  │
+  │ PP-MAE (Swin) [PROPOSED] ★  │ 28.06 │ 0.9565 │ 0.8788 │ 0.8383 │ 0.7903 │ ← BEST TC & ET
+  │ SwinIR-lite (L1)            │ 31.45 │ 0.9796 │ 0.8788 │ 0.7943 │ 0.7601 │
+  │ Uformer-lite (L1)           │ 31.70 │ 0.9801 │ 0.8819 │ 0.8101 │ 0.7707 │
+  │ SwinIR + PathologyLoss      │ 31.20 │ 0.9784 │ 0.8811 │ 0.7670 │ 0.7198 │
+  │ Uformer + PathologyLoss     │ 31.68 │ 0.9802 │ 0.8836 │ 0.8258 │ 0.7780 │
   └─────────────────────────────┴───────┴───────┴─────────┴─────────┴─────────┘
   ★ Proposed model wins on BOTH clinical metrics (Dice_TC and Dice_ET)
     despite 3.4 dB lower PSNR — confirming PSNR alone is insufficient.
