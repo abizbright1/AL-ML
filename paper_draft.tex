@@ -485,8 +485,7 @@ falls marginally behind Uformer+PathologyLoss (0.8836). This is
 expected: WT encompasses oedema and necrotic regions that are
 well-delineated by T2W and FLAIR even without tumour-specific
 inductive bias. The principal gains are in TC and ET — precisely
-the sub-regions where tumour-aware encoding is most consequential
-and where downstream grading accuracy is most sensitive.
+the sub-regions where tumour-aware encoding is most consequential.
 
 \subsection{Statistical Significance}
 
@@ -573,91 +572,6 @@ adding PathologyLoss to a structurally unsuited backbone makes
 things worse rather than better.
 
 % ============================================================
-\section{Brain Tumour Grading}
-
-\subsection{Grading Pipeline}
-
-Accurate glioma grading — distinguishing low-grade glioma (LGG,
-WHO Grade II--III) from glioblastoma multiforme (GBM, WHO Grade IV)
-— is one of the most clinically consequential decisions in neuro-oncology.
-GBM carries a median survival of 15 months despite maximal treatment,
-whereas LGG can follow an indolent course for years. Misclassification
-drives under- or over-treatment. We extend PP-MAE into a three-stage
-pipeline: (1) multi-modal MRI reconstruction, (2) tumour sub-region
-segmentation, and (3) radiomic feature extraction and grade
-classification.
-
-The grading head operates on seven radiomics-inspired features derived
-from the reconstructed image and predicted segmentation:
-\begin{itemize}
-  \item $V_\mathrm{WT}$, $V_\mathrm{TC}$, $V_\mathrm{ET}$ — volume
-        fractions of the three tumour sub-regions;
-  \item $\rho = V_\mathrm{ET} / V_\mathrm{WT}$ — the enhancement
-        ratio, the single most discriminative GBM biomarker
-        clinically \cite{kickingereder2016radiomics};
-  \item $H_\mathrm{WT}$, $H_\mathrm{TC}$, $H_\mathrm{ET}$ —
-        intensity heterogeneity (coefficient of variation) in
-        each sub-region.
-\end{itemize}
-These features are fed to a two-layer MLP (128 hidden units,
-dropout 0.3) that predicts a GBM probability score. The entire
-grading head is trained end-to-end with cross-entropy loss using
-subject-level grade labels from BraTS 2021 clinical metadata.
-
-\subsection{Grading Results}
-
-Table~\ref{tab:grading} summarises grading performance across all
-five denoising models. The central hypothesis is that sharper ET
-boundaries (higher Dice\textsubscript{ET}) produce more accurate
-$V_\mathrm{ET}$ estimates, improving $\rho$ precision and,
-consequently, grading AUC. The results support this hypothesis:
-PP-MAE achieves the highest AUC (0.847), followed by
-Uformer+PathologyLoss (0.821) and Uformer-lite (0.813), ordered
-consistently with their Dice\textsubscript{ET} rankings
-(0.7903, 0.7780, 0.7707).
-
-\begin{table}[t]
-  \caption{Brain tumour grading: LGG vs GBM classification
-    (50 subjects, radiomic feature MLP). Best per column in \textbf{bold}.}
-  \label{tab:grading}
-  \centering
-  \renewcommand{\arraystretch}{1.2}
-  \begin{tabular}{lcccc}
-    \toprule
-    \textbf{Method} & \textbf{AUC} & \textbf{Accuracy}
-      & \textbf{Sensitivity} & \textbf{Specificity} \\
-    \midrule
-    PP-MAE (Proposed)     & \textbf{0.847} & \textbf{0.800}
-      & \textbf{0.833} & 0.762 \\
-    SwinIR-lite (L1)      & 0.798 & 0.760 & 0.778 & 0.738 \\
-    Uformer-lite (L1)     & 0.813 & 0.774 & 0.800 & 0.743 \\
-    SwinIR + PathLoss     & 0.762 & 0.736 & 0.722 & 0.752 \\
-    Uformer + PathLoss    & 0.821 & 0.782 & 0.811 & \textbf{0.748} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-The SwinIR+PathologyLoss model, which damaged ET Dice by 5.3\% relative
-to SwinIR-lite, also produces the lowest grading AUC (0.762). This
-confirms that the degradation cascades through the pipeline: blurred
-ET boundaries → imprecise $V_\mathrm{ET}$ → unreliable $\rho$ →
-reduced grading confidence. The 4.9-point AUC gap between PP-MAE
-(0.847) and SwinIR-lite (0.798) translates directly to fewer missed
-GBM diagnoses at a clinical operating threshold of sensitivity=0.80.
-
-\subsection{Feature Analysis}
-
-Fig.~\ref{fig:radar} shows radar plots of the mean radiomic feature
-profiles for confirmed GBM and LGG subjects. GBM subjects exhibit
-notably higher $V_\mathrm{ET}$ (0.58 vs 0.12), higher $\rho$
-(0.80 vs 0.22), and greater regional heterogeneity in all three
-sub-regions — consistent with the known pathophysiology of
-glioblastoma's irregular, necrotic, and aggressively infiltrating
-character. The enhancement ratio $\rho$ alone provides an
-AUC of approximately 0.78 in isolation, highlighting why ET
-boundary precision is so critical to the grading task.
-
-% ============================================================
 \section{Discussion}
 
 \subsection{Clinical Relevance of the PSNR Paradox}
@@ -695,11 +609,7 @@ after the model has stabilised on global reconstruction.
 Several limitations of the current study warrant acknowledgement.
 The 50-subject cohort, while sufficient to demonstrate significant
 differences via Wilcoxon testing, is smaller than typical BraTS
-benchmarks, which use several hundred subjects. For the grading
-experiment in particular, 50 subjects limits the statistical
-power of the AUC estimates; the reported grading numbers should be
-interpreted as preliminary, with wider confidence intervals than
-a full-cohort evaluation would yield. The MPS
+benchmarks, which use several hundred subjects. The MPS
 backend introduces a hardware-specific constraint — the
 nearest-neighbour upsampling substitution — that may marginally
 reduce reconstruction quality compared to a bilinear or
@@ -722,18 +632,18 @@ We presented PP-MAE, a pathology-preserving masked autoencoder
 that integrates hierarchical Swin Transformer encoding,
 cross-modal attention, saliency-aware feature reweighting, and
 a compound region-weighted PathologyLoss into a unified
-multi-modal MRI reconstruction and grading framework. On BraTS
-2021, PP-MAE achieves Dice scores of 0.8383 (TC) and 0.7903 (ET)
-— the highest among five compared models — despite recording the
-lowest PSNR (28.06 dB). Extended to LGG/GBM grading via radiomic
-feature extraction, PP-MAE reaches an AUC of 0.847, outperforming
-all baselines and confirming that sharper ET boundary delineation
-propagates into more accurate grade prediction. The PSNR paradox
-and the grading cascade together make a strong case for evaluating
-reconstruction models on their clinical utility rather than on
-aggregate image quality scores alone. Future work will validate
-the full pipeline on a larger BraTS cohort and extend the grading
-head to WHO Grade II/III/IV multi-class classification.
+multi-modal MRI reconstruction framework. On BraTS 2021, PP-MAE
+achieves Dice scores of 0.8383 (TC) and 0.7903 (ET) — the
+highest among five compared models — despite recording the lowest
+PSNR (28.06 dB). This PSNR paradox demonstrates that pixel-level
+reconstruction fidelity is an incomplete proxy for diagnostic
+utility in tumour-focused imaging tasks. Our ablation further
+shows that PathologyLoss alone deteriorates ET performance when
+applied to architectures without tumour-oriented inductive bias,
+underscoring the necessity of coherent multi-component design.
+We hope these findings encourage the community to evaluate
+reconstruction models on the downstream tasks they serve, rather
+than on general-purpose image quality metrics alone.
 
 % ============================================================
 \section*{Acknowledgment}
@@ -843,13 +753,6 @@ L.~Sun, Z.~Fan, Y.~Ding, X.~Huang, and J.~Paisley,
 network,''
 in \textit{Proc. Int. Conf. Inf. Process. Med. Imag. (IPMI)},
 2019, pp.~492--504.
-
-\bibitem{kickingereder2016radiomics}
-P.~Kickingereder \textit{et al.},
-``Radiomic profiling of glioblastoma: Identifying an imaging
-predictor of patient survival with improved performance over
-established clinical and radiologic risk models,''
-\textit{Radiology}, vol.~280, no.~3, pp.~880--889, Sep.\ 2016.
 
 \bibitem{hou2019pathologygan}
 L.~Hou, A.~Agarwal, D.~Samaras, T.~M.~Kurc, R.~R.~Gupta, and
