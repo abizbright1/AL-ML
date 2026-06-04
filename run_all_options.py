@@ -121,6 +121,8 @@ _parser.add_argument('--rounds',       type=str,   default='1,2,3,4,5',
                      help='Comma-separated list of rounds to run (e.g. "1,3,5")')
 _parser.add_argument('--device', type=str, default=None,
                      help='Force device: cpu, mps, or cuda (default: auto-detect)')
+_parser.add_argument('--seed', type=int, default=42,
+                     help='Random seed for reproducibility')
 _args = _parser.parse_args()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -139,7 +141,7 @@ D_EPOCHS   = _args.epochs
 S_EPOCHS   = _args.seg_epochs
 PATCH_SIZE = _args.patch_size
 SIGMA      = _args.sigma
-SEED       = 42
+SEED       = _args.seed
 BATCH_SIZE = 4
 MAX_SUBJ   = _args.max_subjects
 ROUNDS     = [int(r.strip()) for r in _args.rounds.split(',') if r.strip()]
