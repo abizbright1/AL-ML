@@ -59,17 +59,17 @@ step() {
 
 ok() { echo "  ✓ $1"; }
 
-# ── Step 1: Round 4 single training run ───────────────────────────────────────
-step "Round 4 — single training run (sanity check)"
+# ── Step 1: Round 4 + Round 6 (Option 4 and Option 5 with grading) ────────────
+step "Round 4 + Round 6 — PP-MAE Option 4 (reconstruction+seg) and Option 5 (+ grading)"
 "$PY" "$SCRIPT_DIR/run_all_options.py" "$DATA_DIR" \
-    --rounds 4 \
+    --rounds 4,6 \
     --epochs "$EPOCHS" \
     --seg_epochs "$SEG_EPOCHS" \
     --max_subjects "$MAX_SUBJ" \
     --device "$DEVICE" \
     --seed 42 \
     --out "$SCRIPT_DIR/results/round4"
-ok "Saved → results/round4/"
+ok "Saved → results/round4/ (options_results.csv + grading_results.csv)"
 
 # ── Step 2: Multi-seed (reproducibility) ──────────────────────────────────────
 step "Multi-seed — 3 seeds → mean ± std"
@@ -91,28 +91,17 @@ step "Noise ablation — σ = 0.05 / 0.08 / 0.15"
     --out "$SCRIPT_DIR/results/noise_ablation"
 ok "Saved → results/noise_ablation/noise_ablation.csv, psnr chart, Dice_ET chart"
 
-# ── Step 4: Option 4 + Grading (joint denoising + seg + grade prediction) ─────
-step "Round 5 Grading — PP-MAE Option 4 + GradingHead vs baselines"
-"$PY" "$SCRIPT_DIR/run_grading_round.py" "$DATA_DIR" \
-    --epochs "$EPOCHS" \
-    --seg_epochs "$SEG_EPOCHS" \
-    --grade_epochs "$SEG_EPOCHS" \
-    --max_subjects "$MAX_SUBJ" \
-    --device "$DEVICE" \
-    --out "$SCRIPT_DIR/results/round5_grading"
-ok "Saved → results/round5_grading/ (options_results.csv, grading_results.csv)"
-
-# ── Step 5: Grading figures ───────────────────────────────────────────────────
+# ── Step 4: Grading figures ───────────────────────────────────────────────────
 step "Grading figures — 8 figures (ROC, confusion, radar, scatter)"
 "$PY" "$SCRIPT_DIR/grading_visuals.py" \
     --data_dir "$DATA_DIR" \
-    --results_dir "$SCRIPT_DIR/results/round5_grading" \
+    --results_dir "$SCRIPT_DIR/results/round4" \
     --device "$DEVICE" \
     --n_subjects "$N_SUBJ_VIZ" \
     --out "$SCRIPT_DIR/paper_figs/grading"
 ok "Saved → paper_figs/grading/ (8 grading figures)"
 
-# ── Step 6: Paper figures ──────────────────────────────────────────────────────
+# ── Step 5: Paper figures ──────────────────────────────────────────────────────
 step "Paper figures — 12 figures (data + model)"
 N_SUBJ=3
 if [[ $SMOKE -eq 1 ]]; then N_SUBJ=1; fi
@@ -129,10 +118,9 @@ echo "════════════════════════�
 echo "  ALL DONE"
 echo "══════════════════════════════════════════════════════════════"
 echo ""
-echo "  results/round4/          Round 4 CSV + bar charts"
+echo "  results/round4/          Round 4+6 CSV, bar charts + grading_results.csv"
 echo "  results/multiseed/       Mean ± std across 3 seeds"
 echo "  results/noise_ablation/  PSNR & Dice_ET vs noise level"
-echo "  results/round5_grading/  Grading CSV (AUC, Acc, Sens, Spec)"
 echo "  paper_figs/              12 reconstruction/seg figures"
 echo "  paper_figs/grading/      8 grading figures (ROC, confusion, radar)"
 echo ""

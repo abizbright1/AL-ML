@@ -12,6 +12,8 @@ architecture-matched baselines:
   Round 4 — Swin Family     (Option 4 vs SwinIR-lite / Uformer-lite)
   Round 5 — SOTA 2021-2026  (Option 3 vs nnU-Net / TransBTS / MedSegDiff /
                               SwinUNETR-v2 / MedSAM / MedNeXt)
+  Round 6 — Option 5        (PP-MAE Option 4 + GradingHead vs RadioTransformer
+                              / CBAM-ResNet: joint denoising+seg+grading)
 
 Final head-to-head: the best PP-MAE from each round compared directly.
 
@@ -117,8 +119,8 @@ _parser.add_argument('--out',          type=str,   default=None,
                      help='Output directory for plots and CSV')
 _parser.add_argument('--max_subjects', type=int,   default=None,
                      help='Limit number of BraTS subjects (None = all; demo uses 6)')
-_parser.add_argument('--rounds',       type=str,   default='1,2,3,4,5',
-                     help='Comma-separated list of rounds to run (e.g. "1,3,5")')
+_parser.add_argument('--rounds',       type=str,   default='1,2,3,4,5,6',
+                     help='Comma-separated list of rounds to run (e.g. "4,6")')
 _parser.add_argument('--device', type=str, default=None,
                      help='Force device: cpu, mps, or cuda (default: auto-detect)')
 _parser.add_argument('--seed', type=int, default=42,
@@ -673,16 +675,114 @@ if 4 in ROUNDS:
     all_histories['Round 4 — Swin'] = r4_hist
 
 
+# ── Round 6: Option 5 — Joint Denoising + Segmentation + Grading ─────────────
+if 6 in ROUNDS:
+    from option5_grading_pp_mae import GradingPPMAE, GradingPPMAETrainer
+    from grading_baselines import RadioTransformer, RadioTransformerTrainer, \
+                                   CBAMResNet, SliceGradingTrainer
+    from grading import assign_demo_grade_labels
+
+    _opt5 = GradingPPMAE(in_ch=4, embed_dim=48, depths=(2,2,2,2),
+                          n_heads=(3,3,6,6), window_size=4)
+    _opt5_trainer = GradingPPMAETrainer(_opt5, device=DEVICE, lr=1e-4)
+
+    # Train Option 5 end-to-end
+    print(f"\n{'='*60}", flush=True)
+    print("  Round 6 — Option 5: Joint PP-MAE + GradingHead", flush=True)
+    print(f"{'='*60}\n", flush=True)
+    for ep in range(D_EPOCHS):
+        loss = _opt5_trainer.train_epoch(train_loader)
+        print(f"  Ep {ep+1}/{D_EPOCHS}  loss={loss:.4f}", flush=True)
+
+    r6_metrics = _opt5_trainer.evaluate(val_loader)
+
+    # Grading baselines: RadioTransformer and CBAM-ResNet
+    # Build grade labels for baseline trainers
+    _grade_labels = {}
+    for batch in train_loader:
+        for i, subj in enumerate(batch.get('subject', [])):
+            seg_np = batch['seg'][i, 0].numpy()
+            et_vol = float((seg_np == 3).sum()) / seg_np.size
+            tc_vol = float(((seg_np == 1) | (seg_np == 3)).sum()) / seg_np.size
+            rho    = et_vol / max(tc_vol, 1e-4)
+            _grade_labels[subj] = 1 if rho > 0.35 else 0
+
+    _radio = RadioTransformer(n_features=7, n_heads=2, n_layers=2, dim=32)
+    _radio_trainer = RadioTransformerTrainer(_radio, device=DEVICE, lr=1e-3)
+
+    _cbam = CBAMResNet(in_ch=4, base_ch=16, n_blocks=2)
+    _cbam_trainer = SliceGradingTrainer(_cbam, device=DEVICE, lr=1e-3)
+
+    for ep in range(D_EPOCHS):
+        _radio_trainer.train_epoch(train_loader, _grade_labels)
+        _cbam_trainer.train_epoch(train_loader, _grade_labels)
+
+    r6_radio = _radio_trainer.evaluate(val_loader, _grade_labels)
+    r6_cbam  = _cbam_trainer.evaluate(val_loader, _grade_labels)
+
+    r6_results = {
+        'PP-MAE Option 5 (Joint) [PROPOSED]': {
+            'psnr': r6_metrics['PSNR'],  'ssim': 0.0,
+            'dice_wt': 0.0, 'dice_tc': 0.0,
+            'dice_et': r6_metrics['Dice_ET'],
+            'auc':  r6_metrics['AUC'],
+            'acc':  r6_metrics['Acc'],
+            'sens': r6_metrics['Sens'],
+            'spec': r6_metrics['Spec'],
+            '_dice_et_samples': [], '_dice_tc_samples': [], '_dice_wt_samples': [],
+        },
+        'RadioTransformer': {
+            'psnr': 0.0, 'ssim': 0.0, 'dice_wt': 0.0, 'dice_tc': 0.0, 'dice_et': 0.0,
+            'auc':  r6_radio.get('auc', 0.5), 'acc': r6_radio.get('acc', 0.5),
+            'sens': r6_radio.get('sens', 0.5), 'spec': r6_radio.get('spec', 0.5),
+            '_dice_et_samples': [], '_dice_tc_samples': [], '_dice_wt_samples': [],
+        },
+        'CBAM-ResNet': {
+            'psnr': 0.0, 'ssim': 0.0, 'dice_wt': 0.0, 'dice_tc': 0.0, 'dice_et': 0.0,
+            'auc':  r6_cbam.get('auc', 0.5), 'acc': r6_cbam.get('acc', 0.5),
+            'sens': r6_cbam.get('sens', 0.5), 'spec': r6_cbam.get('spec', 0.5),
+            '_dice_et_samples': [], '_dice_tc_samples': [], '_dice_wt_samples': [],
+        },
+    }
+    all_results['Round 6 — Option 5 Grading'] = r6_results
+    all_histories['Round 6 — Option 5 Grading'] = {}
+
+    # Print grading table
+    print(f"\n{'='*70}", flush=True)
+    print("  ROUND 6 RESULTS — Option 5 Joint Grading", flush=True)
+    print(f"{'='*70}", flush=True)
+    print(f"  {'Method':<35}  {'PSNR':>6}  {'Dice_ET':>8}  {'AUC':>6}  {'Acc':>6}  {'Sens':>6}  {'Spec':>6}", flush=True)
+    print('-' * 80, flush=True)
+    for name, m in r6_results.items():
+        marker = '  <-- Option 5' if 'PROPOSED' in name else ''
+        print(f"  {name:<35}  {m['psnr']:6.2f}  {m['dice_et']:8.3f}  "
+              f"{m['auc']:6.3f}  {m['acc']:6.3f}  {m['sens']:6.3f}  {m['spec']:6.3f}{marker}",
+              flush=True)
+
+    # Save grading CSV
+    _grade_csv = os.path.join(OUT, 'grading_results.csv')
+    with open(_grade_csv, 'w', newline='') as _gf:
+        _gw = csv.DictWriter(_gf, fieldnames=['Method', 'PSNR', 'Dice_ET', 'AUC', 'Acc', 'Sens', 'Spec'])
+        _gw.writeheader()
+        for name, m in r6_results.items():
+            _gw.writerow({'Method': name, 'PSNR': f"{m['psnr']:.4f}",
+                          'Dice_ET': f"{m['dice_et']:.4f}", 'AUC': f"{m['auc']:.4f}",
+                          'Acc': f"{m['acc']:.4f}", 'Sens': f"{m['sens']:.4f}",
+                          'Spec': f"{m['spec']:.4f}"})
+    print(f"  Saved {_grade_csv}", flush=True)
+
+
 # =============================================================================
 # SUMMARY PRINTING
 # =============================================================================
 
 ROUND_LABELS = {
-    'Round 1 — CNN':        ('ROUND 1', 'PP-MAE CNN (clinical_risk)'),
-    'Round 2 — ViT/MAE':    ('ROUND 2', 'ViT PP-MAE 2D'),
-    'Round 3 — Multi-task': ('ROUND 3', 'PP-MAE Pipeline'),
-    'Round 4 — Swin':       ('ROUND 4', 'PP-MAE (Swin) [PROPOSED]'),
-    'Round 5 — SOTA':       ('ROUND 5', 'PP-MAE Pipeline'),
+    'Round 1 — CNN':                ('ROUND 1', 'PP-MAE CNN (clinical_risk)'),
+    'Round 2 — ViT/MAE':            ('ROUND 2', 'ViT PP-MAE 2D'),
+    'Round 3 — Multi-task':         ('ROUND 3', 'PP-MAE Pipeline'),
+    'Round 4 — Swin':               ('ROUND 4', 'PP-MAE (Swin) [PROPOSED]'),
+    'Round 5 — SOTA':               ('ROUND 5', 'PP-MAE Pipeline'),
+    'Round 6 — Option 5 Grading':   ('ROUND 6', 'PP-MAE Option 5 (Joint) [PROPOSED]'),
 }
 
 best_per_round: Dict[str, Tuple[str, Dict[str, float]]] = {}
