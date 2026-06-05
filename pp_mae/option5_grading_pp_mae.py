@@ -84,7 +84,7 @@ class GradingPPMAE(nn.Module):
         self.denoiser  = SwinPPMAE(in_ch=in_ch, embed_dim=embed_dim,
                                     depths=depths, n_heads=n_heads,
                                     window_size=window_size)
-        self.segmentor = UNetSegmentor(in_ch=in_ch, base_ch=seg_base_ch,
+        self.segmentor = UNetSegmentor(in_channels=in_ch, base_ch=seg_base_ch,
                                         n_classes=n_seg_classes)
         self.grading   = GradingHead(n_features=n_features)
 
