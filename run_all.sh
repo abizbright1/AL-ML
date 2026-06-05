@@ -38,8 +38,9 @@ for i in "${!@}"; do
     fi
 done
 
+N_SUBJ_VIZ=3
 if [[ $SMOKE -eq 1 ]]; then
-    EPOCHS=2; SEG_EPOCHS=2; MAX_SUBJ=5
+    EPOCHS=2; SEG_EPOCHS=2; MAX_SUBJ=5; N_SUBJ_VIZ=1
     echo "  [SMOKE TEST mode: epochs=2, max_subjects=5]"
 fi
 
@@ -90,7 +91,28 @@ step "Noise ablation — σ = 0.05 / 0.08 / 0.15"
     --out "$SCRIPT_DIR/results/noise_ablation"
 ok "Saved → results/noise_ablation/noise_ablation.csv, psnr chart, Dice_ET chart"
 
-# ── Step 4: Paper figures ──────────────────────────────────────────────────────
+# ── Step 4: Option 4 + Grading (joint denoising + seg + grade prediction) ─────
+step "Round 5 Grading — PP-MAE Option 4 + GradingHead vs baselines"
+"$PY" "$SCRIPT_DIR/run_grading_round.py" "$DATA_DIR" \
+    --epochs "$EPOCHS" \
+    --seg_epochs "$SEG_EPOCHS" \
+    --grade_epochs "$SEG_EPOCHS" \
+    --max_subjects "$MAX_SUBJ" \
+    --device "$DEVICE" \
+    --out "$SCRIPT_DIR/results/round5_grading"
+ok "Saved → results/round5_grading/ (options_results.csv, grading_results.csv)"
+
+# ── Step 5: Grading figures ───────────────────────────────────────────────────
+step "Grading figures — 8 figures (ROC, confusion, radar, scatter)"
+"$PY" "$SCRIPT_DIR/grading_visuals.py" \
+    --data_dir "$DATA_DIR" \
+    --results_dir "$SCRIPT_DIR/results/round5_grading" \
+    --device "$DEVICE" \
+    --n_subjects "$N_SUBJ_VIZ" \
+    --out "$SCRIPT_DIR/paper_figs/grading"
+ok "Saved → paper_figs/grading/ (8 grading figures)"
+
+# ── Step 6: Paper figures ──────────────────────────────────────────────────────
 step "Paper figures — 12 figures (data + model)"
 N_SUBJ=3
 if [[ $SMOKE -eq 1 ]]; then N_SUBJ=1; fi
@@ -107,10 +129,12 @@ echo "════════════════════════�
 echo "  ALL DONE"
 echo "══════════════════════════════════════════════════════════════"
 echo ""
-echo "  results/round4/         — Round 4 CSV + bar charts"
-echo "  results/multiseed/      — Mean ± std across 3 seeds"
-echo "  results/noise_ablation/ — PSNR & Dice_ET vs noise level"
-echo "  paper_figs/             — 12 publication figures"
+echo "  results/round4/          Round 4 CSV + bar charts"
+echo "  results/multiseed/       Mean ± std across 3 seeds"
+echo "  results/noise_ablation/  PSNR & Dice_ET vs noise level"
+echo "  results/round5_grading/  Grading CSV (AUC, Acc, Sens, Spec)"
+echo "  paper_figs/              12 reconstruction/seg figures"
+echo "  paper_figs/grading/      8 grading figures (ROC, confusion, radar)"
 echo ""
 echo "  To push results to GitHub:"
 echo "    git add results/ paper_figs/"
