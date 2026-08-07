@@ -605,6 +605,258 @@ def fig_regions(dumps, idx, fig_dir):
     _save(fig, os.path.join(fig_dir, 'fig09_tumour_regions.png'))
 
 
+# ── Figures restored from visualize_paper_figures.py ───────────────────────
+
+def _add_rician(arr, sigma, rng):
+    """Same corruption model as brats_loader.py:79 — for the sigma sweep."""
+    nr = rng.standard_normal(arr.shape).astype(np.float32) * sigma
+    ni = rng.standard_normal(arr.shape).astype(np.float32) * sigma
+    return np.sqrt((arr + nr) ** 2 + ni ** 2).clip(0., 1.).astype(np.float32)
+
+
+def fig_noise_progression(dumps, idx, fig_dir, sigmas=(0.0, 0.05, 0.08, 0.15)):
+    """Clean -> increasing Rician noise, for T1ce and FLAIR."""
+    d = dumps[0]
+    rng = np.random.default_rng(42)
+    fig, axes = plt.subplots(2, len(sigmas), figsize=(4.0 * len(sigmas), 8.2))
+    fig.suptitle('Rician noise progression', fontsize=13, fontweight='bold')
+    for r, c in enumerate([1, 3]):
+        clean = d['clean'][idx, c]
+        for j, s in enumerate(sigmas):
+            img = clean if s == 0 else _add_rician(clean, s, rng)
+            ax = axes[r, j]
+            ax.imshow(img, cmap='gray', vmin=0, vmax=1)
+            ax.set_title('Clean' if s == 0 else f'sigma={s}',
+                         fontweight='bold', fontsize=10)
+            ax.axis('off')
+            if s > 0:
+                mse = float(np.mean((img - clean) ** 2))
+                ax.text(.97, .03, f'{10*np.log10(1/(mse+1e-10)):.1f} dB',
+                        transform=ax.transAxes, ha='right', va='bottom',
+                        color='yellow', fontsize=8,
+                        bbox=dict(fc='black', alpha=.5, pad=1))
+        axes[r, 0].set_ylabel(MODALITIES[c])
+    _save(fig, os.path.join(fig_dir, 'fig10_noise_progression.png'))
+
+
+def fig_weight_map(dumps, idx, fig_dir):
+    """PathologyLoss weighting: ET=3, TC=2, WT=1, background=0."""
+    d, gt = dumps[0], dumps[0]['seg_gt'][idx]
+    t1ce = d['clean'][idx, 1]
+    w = (region_mask(gt, 'WT').astype(np.float32)
+         + region_mask(gt, 'TC').astype(np.float32)
+         + region_mask(gt, 'ET').astype(np.float32))
+    cmap = LinearSegmentedColormap.from_list(
+        'w', ['#1a237e', '#1565C0', '#FFD600', '#B71C1C'])
+
+    fig, axes = plt.subplots(1, 4, figsize=(18, 4.4))
+    fig.suptitle('PathologyLoss weighting  (ET x3, TC x2, WT x1)',
+                 fontsize=13, fontweight='bold')
+    axes[0].imshow(t1ce, cmap='gray');            axes[0].set_title('T1ce')
+    _overlay(axes[1], t1ce, gt);                  axes[1].set_title('Ground truth')
+    im = axes[2].imshow(w, cmap=cmap, vmin=0, vmax=3)
+    axes[2].set_title('Weight map')
+    plt.colorbar(im, ax=axes[2], fraction=.046, ticks=[0, 1, 2, 3])
+    axes[3].imshow(t1ce, cmap='gray')
+    axes[3].imshow(np.ma.masked_where(w == 0, w), cmap=cmap, alpha=.65,
+                   vmin=0, vmax=3)
+    axes[3].set_title('Overlay')
+    for ax in axes:
+        ax.axis('off')
+    _save(fig, os.path.join(fig_dir, 'fig11_pathology_weight_map.png'))
+
+
+def fig_loss_heatmap(dumps, idx, fig_dir, mod=1):
+    """Pathology-weighted error |pred-clean| * weight, for every model."""
+    gt = dumps[0]['seg_gt'][idx]
+    clean = dumps[0]['clean'][idx, mod]
+    w = 1.0 + (region_mask(gt, 'WT').astype(np.float32)
+               + region_mask(gt, 'TC').astype(np.float32)
+               + 2 * region_mask(gt, 'ET').astype(np.float32))
+    maps = [np.abs(d['denoised'][idx, mod] - clean) * w for d in dumps]
+    vmax = max(float(m.max()) for m in maps) or 0.01
+
+    n = len(dumps)
+    fig, axes = plt.subplots(1, n + 1, figsize=(3.2 * (n + 1), 3.9))
+    fig.suptitle('Pathology-weighted error — errors inside ET count triple',
+                 fontsize=12, fontweight='bold')
+    axes[0].imshow(w, cmap='hot', vmin=0, vmax=4)
+    axes[0].set_title('Weight map', fontweight='bold', fontsize=9)
+    im = None
+    for k, (d, m) in enumerate(zip(dumps, maps)):
+        im = axes[k + 1].imshow(m, cmap='hot', vmin=0, vmax=vmax)
+        axes[k + 1].set_title(f"{d['short']}\nsum={m.sum():.0f}",
+                              fontweight='bold', fontsize=9)
+    for ax in axes:
+        ax.axis('off')
+    if im is not None:
+        plt.colorbar(im, ax=axes.tolist(), fraction=.02, pad=.01)
+    _save(fig, os.path.join(fig_dir, 'fig12_loss_heatmap.png'))
+
+
+def fig_pipeline(dumps, idx, fig_dir, mod=1):
+    """End-to-end strip: noisy -> denoised -> segmented -> ground truth."""
+    prop = dumps[0]
+    fig, axes = plt.subplots(1, 4, figsize=(17, 4.4))
+    fig.suptitle(f"End-to-end pipeline  ({prop['short']})",
+                 fontsize=13, fontweight='bold')
+    axes[0].imshow(prop['noisy'][idx, mod], cmap='gray', vmin=0, vmax=1)
+    axes[0].set_title('1. Noisy MRI', fontweight='bold', fontsize=10)
+    axes[1].imshow(prop['denoised'][idx, mod], cmap='gray', vmin=0, vmax=1)
+    axes[1].set_title('2. Reconstruction', fontweight='bold', fontsize=10)
+    _overlay(axes[2], prop['denoised'][idx, mod], prop['seg_pred'][idx])
+    axes[2].set_title('3. Predicted mask', fontweight='bold', fontsize=10)
+    _overlay(axes[3], prop['clean'][idx, mod], prop['seg_gt'][idx])
+    axes[3].set_title('4. Ground truth', fontweight='bold', fontsize=10)
+    for i, ax in enumerate(axes):
+        ax.axis('off')
+        if i < 3:
+            ax.annotate('', xy=(1.10, .5), xytext=(1.01, .5),
+                        xycoords='axes fraction',
+                        arrowprops=dict(arrowstyle='->', lw=2, color='#333'))
+    _save(fig, os.path.join(fig_dir, 'fig13_pipeline.png'))
+
+
+def fig_cross_modal(dumps, idx, fig_dir):
+    """Where clinically paired modalities differ most.
+
+    NOTE: this is a DATA figure about modality complementarity. It does not
+    show cross-modal attention weights — see the caveat in the module docstring.
+    """
+    d = dumps[0]
+    pairs = [(1, 2, 'T1ce', 'T2'), (2, 3, 'T2', 'FLAIR')]
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8.6))
+    fig.suptitle('Complementary modality pairs — where they disagree',
+                 fontsize=13, fontweight='bold')
+    for r, (a, b, na, nb) in enumerate(pairs):
+        axes[r, 0].imshow(d['clean'][idx, a], cmap='gray'); axes[r, 0].set_title(na)
+        axes[r, 1].imshow(d['clean'][idx, b], cmap='gray'); axes[r, 1].set_title(nb)
+        im = axes[r, 2].imshow(np.abs(d['clean'][idx, a] - d['clean'][idx, b]),
+                               cmap='RdYlBu_r', vmin=0, vmax=.5)
+        axes[r, 2].set_title(f'|{na} - {nb}|')
+        plt.colorbar(im, ax=axes[r, 2], fraction=.046)
+    for ax in axes.flat:
+        ax.axis('off')
+    _save(fig, os.path.join(fig_dir, 'fig14_cross_modal.png'))
+
+
+def fig_results_table(results, fig_dir):
+    cols = ['Method', 'PSNR', 'SSIM', 'Dice_WT', 'Dice_TC', 'Dice_ET', 'mask?']
+    rows = [[r['Short'], f"{float(r['PSNR']):.2f}", f"{float(r['SSIM']):.3f}",
+             f"{float(r['Dice_WT']):.3f}", f"{float(r['Dice_TC']):.3f}",
+             f"{float(r['Dice_ET']):.3f}",
+             'YES' if str(r.get('MaskAtInference')) in ('True', 'true') else '-']
+            for r in results]
+    fig, ax = plt.subplots(figsize=(13, .55 * len(rows) + 1.6))
+    ax.axis('off')
+    t = ax.table(cellText=rows, colLabels=cols, loc='center', cellLoc='center')
+    t.auto_set_font_size(False); t.set_fontsize(9); t.scale(1, 1.6)
+    for j in range(len(cols)):
+        t[(0, j)].set_facecolor('#1565C0')
+        t[(0, j)].set_text_props(color='white', fontweight='bold')
+    for i, r in enumerate(results):
+        if 'PROPOSED' in r['Method']:
+            for j in range(len(cols)):
+                t[(i + 1, j)].set_facecolor('#FFF3E0')
+                t[(i + 1, j)].set_text_props(fontweight='bold')
+    ax.set_title('Results — mask? flags unequal information at inference',
+                 fontweight='bold', fontsize=11, pad=12)
+    _save(fig, os.path.join(fig_dir, 'fig15_results_table.png'))
+
+
+# ── Subject-level statistics ────────────────────────────────────────────────
+
+def subject_level_stats(out_dir):
+    """Wilcoxon on PER-SUBJECT mean Dice, with Holm correction.
+
+    Why not per-slice: ~11 slices from one patient are near-identical, so
+    treating them as independent inflates n roughly tenfold. That is what
+    produced p = 2.7e-24 for a 0.05 Dice difference in run_all_options.py.
+    Averaging within subject first gives one independent value per patient.
+    """
+    csv_path = os.path.join(out_dir, 'per_slice_metrics.csv')
+    if not os.path.exists(csv_path):
+        print('  per_slice_metrics.csv not found — skipping stats')
+        return
+    try:
+        from scipy.stats import wilcoxon
+    except ImportError:
+        print('  scipy not installed — skipping stats  (pip3 install scipy)')
+        return
+
+    by = {}
+    with open(csv_path) as f:
+        for row in csv.DictReader(f):
+            m, s = row['method'], row['subject']
+            for reg in ('dice_wt', 'dice_tc', 'dice_et'):
+                v = row[reg]
+                if v not in ('', 'nan'):
+                    by.setdefault((m, reg), {}).setdefault(s, []).append(float(v))
+
+    methods = sorted({m for m, _ in by})
+    proposed = next((m for m in methods if 'PROPOSED' in m), None)
+    if proposed is None:
+        print('  no [PROPOSED] method found — skipping stats')
+        return
+
+    tests = []
+    for reg in ('dice_wt', 'dice_tc', 'dice_et'):
+        pm = {s: float(np.mean(v)) for s, v in by.get((proposed, reg), {}).items()}
+        for m in methods:
+            if m == proposed:
+                continue
+            bm = {s: float(np.mean(v)) for s, v in by.get((m, reg), {}).items()}
+            shared = sorted(set(pm) & set(bm))
+            if len(shared) < 6:
+                tests.append((reg, m, len(shared), float('nan'), float('nan')))
+                continue
+            a = np.array([pm[s] for s in shared])
+            b = np.array([bm[s] for s in shared])
+            try:
+                p = float(wilcoxon(a, b).pvalue)
+            except ValueError:          # all differences zero
+                p = 1.0
+            tests.append((reg, m, len(shared), float(np.mean(a - b)), p))
+
+    # Holm-Bonferroni across the whole family of comparisons
+    valid = [t for t in tests if not np.isnan(t[4])]
+    order = sorted(range(len(valid)), key=lambda i: valid[i][4])
+    k, adj = len(valid), {}
+    running = 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, valid[i][4] * (k - rank)))
+        adj[id(valid[i])] = running
+
+    out = os.path.join(out_dir, 'significance_subject_level.csv')
+    with open(out, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(['Region', 'Proposed', 'Baseline', 'N_subjects',
+                    'Mean_diff', 'p_raw', 'p_holm', 'Significant_0.05'])
+        for t in tests:
+            reg, m, n, d_, p = t
+            ph = adj.get(id(t), float('nan'))
+            w.writerow([reg.upper(), proposed, m, n,
+                        '' if np.isnan(d_) else f'{d_:+.4f}',
+                        '' if np.isnan(p) else f'{p:.6g}',
+                        '' if np.isnan(ph) else f'{ph:.6g}',
+                        '' if np.isnan(ph) else ('yes' if ph < .05 else 'no')])
+
+    print(f"\n  {'Region':<9}{'Baseline':<26}{'n':>4}{'diff':>9}"
+          f"{'p_raw':>11}{'p_holm':>11}  sig")
+    print('  ' + '-' * 74)
+    for t in tests:
+        reg, m, n, d_, p = t
+        ph = adj.get(id(t), float('nan'))
+        print(f"  {reg.upper():<9}{m[:25]:<26}{n:>4}"
+              f"{'' if np.isnan(d_) else f'{d_:+.4f}':>9}"
+              f"{'' if np.isnan(p) else f'{p:.3g}':>11}"
+              f"{'' if np.isnan(ph) else f'{ph:.3g}':>11}"
+              f"  {'*' if (not np.isnan(ph) and ph < .05) else 'ns'}")
+    print(f"\n  saved {out}")
+    print("  n = SUBJECTS, not slices. Expect far fewer stars than "
+          "run_all_options.py — these are the defensible ones.\n")
+
+
 def make_all_figures(out_dir, sigma, results=None, histories=None):
     pred_dir, fig_dir = os.path.join(out_dir, 'predictions'), os.path.join(out_dir, 'figures')
     dumps = load_dumps(pred_dir)
@@ -622,6 +874,13 @@ def make_all_figures(out_dir, sigma, results=None, histories=None):
     fig_segmentation(dumps, idx, fig_dir)
     fig_regions(dumps, idx, fig_dir)
 
+    # restored from visualize_paper_figures.py
+    fig_noise_progression(dumps, idx, fig_dir)
+    fig_weight_map(dumps, idx, fig_dir)
+    fig_loss_heatmap(dumps, idx, fig_dir)
+    fig_pipeline(dumps, idx, fig_dir)
+    fig_cross_modal(dumps, idx, fig_dir)
+
     if results is None:
         p = os.path.join(out_dir, 'options_results.csv')
         if os.path.exists(p):
@@ -630,8 +889,12 @@ def make_all_figures(out_dir, sigma, results=None, histories=None):
     if results:
         fig_metrics(results, fig_dir)
         fig_paradox(results, fig_dir)
+        fig_results_table(results, fig_dir)
     if histories:
         fig_curves(histories, fig_dir)
+
+    print("\n=== SUBJECT-LEVEL SIGNIFICANCE ===")
+    subject_level_stats(out_dir)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
