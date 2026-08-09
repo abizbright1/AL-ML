@@ -73,6 +73,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_DIR, 'pp_mae'))
 
 from option4_swin_pp_mae import SwinPPMAE, SwinPPMAETrainer
+from option4_swin_pp_mae_v2 import SwinPPMAEv2, SwinPPMAEv2Trainer
 from option_baselines import (
     SwinIRLite, SwinIRTrainer, SwinIRPathologyTrainer,
     UformerLite, UformerTrainer, UformerPathologyTrainer,
@@ -175,14 +176,23 @@ def nanmean(xs: List[float]) -> float:
 def build_models(device: str) -> Dict[str, dict]:
     """Round 4 exactly as specified in proposal section 6.5."""
     return {
-        'PP-MAE (Swin) [PROPOSED]': {
+        'PP-MAE-v2 (mask-free) [PROPOSED]': {
+            'class':  SwinPPMAEv2,
+            'config': dict(in_ch=4, embed_dim=48, depths=(2, 2, 2, 2),
+                           n_heads=(3, 3, 6, 6), window_size=4, lambda_s=2.0),
+            'trainer_fn': lambda m: SwinPPMAEv2Trainer(m, device=device),
+            'infer_fn':   lambda m, noisy, seg: m(noisy)[0],
+            'uses_mask_at_inference': False,
+            'short': 'PP-MAE-v2',
+        },
+        'PP-MAE-v1 (mask-gated)': {
             'class':  SwinPPMAE,
             'config': dict(in_ch=4, embed_dim=48, depths=(2, 2, 2, 2),
                            n_heads=(3, 3, 6, 6), window_size=4),
             'trainer_fn': lambda m: SwinPPMAETrainer(m, device=device),
             'infer_fn':   lambda m, noisy, seg: m(noisy, seg),
             'uses_mask_at_inference': True,      # <-- the known confound
-            'short': 'PP-MAE',
+            'short': 'PP-MAE-v1',
         },
         'SwinIR-lite (L1)': {
             'class':  SwinIRLite,
