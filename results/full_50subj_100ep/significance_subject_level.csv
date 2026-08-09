@@ -1,0 +1,13 @@
+Region,Proposed,Baseline,N_subjects,Mean_diff,p_raw,p_holm,Significant_0.05
+DICE_WT,PP-MAE (Swin) [PROPOSED],SwinIR + PathologyLoss,50,+0.0088,0.00475705,0.0426577,yes
+DICE_WT,PP-MAE (Swin) [PROPOSED],SwinIR-lite (L1),50,+0.0128,0.00652521,0.0456764,yes
+DICE_WT,PP-MAE (Swin) [PROPOSED],Uformer + PathologyLoss,50,+0.0029,0.639009,1,no
+DICE_WT,PP-MAE (Swin) [PROPOSED],Uformer-lite (L1),50,-0.0008,0.645876,1,no
+DICE_TC,PP-MAE (Swin) [PROPOSED],SwinIR + PathologyLoss,48,+0.0569,0.00174735,0.0192209,yes
+DICE_TC,PP-MAE (Swin) [PROPOSED],SwinIR-lite (L1),48,+0.0615,0.000665884,0.0079906,yes
+DICE_TC,PP-MAE (Swin) [PROPOSED],Uformer + PathologyLoss,48,+0.0183,0.421256,1,no
+DICE_TC,PP-MAE (Swin) [PROPOSED],Uformer-lite (L1),48,+0.0184,0.231781,1,no
+DICE_ET,PP-MAE (Swin) [PROPOSED],SwinIR + PathologyLoss,48,+0.0532,0.00473975,0.0426577,yes
+DICE_ET,PP-MAE (Swin) [PROPOSED],SwinIR-lite (L1),48,+0.0520,0.00195264,0.0195264,yes
+DICE_ET,PP-MAE (Swin) [PROPOSED],Uformer + PathologyLoss,48,+0.0136,0.907333,1,no
+DICE_ET,PP-MAE (Swin) [PROPOSED],Uformer-lite (L1),48,+0.0118,0.596731,1,no

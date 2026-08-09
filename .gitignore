@@ -2,8 +2,9 @@ pp_mae/__pycache__/
 **/__pycache__/
 *.pyc
 2026-06-03_final_paper_gpu_results/
-results/
 *.pt
 *.npz
 paper_figs/
 .DS_Store
+results/**/checkpoints/
+results/**/predictions/
