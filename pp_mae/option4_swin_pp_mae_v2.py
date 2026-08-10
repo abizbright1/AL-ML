@@ -202,10 +202,14 @@ class SwinPPMAEv2(nn.Module):
         n_heads: Tuple[int, ...] = (3, 3, 6, 6),
         window_size: int = 4,
         lambda_s: float = 2.0,
+        use_cma: bool = True,
+        use_sar: bool = True,
     ):
         super().__init__()
         self.in_ch = in_ch
         self.lambda_s = lambda_s
+        self.use_cma = use_cma      # ablation switch (proposal section 6.8)
+        self.use_sar = use_sar      # ablation switch (proposal section 6.8)
 
         # --- per-modality embedding (replaces the single fused Conv2d) ----
         self.patch_embed = MultiModalPatchEmbed(in_ch, embed_dim, patch=4)
@@ -262,8 +266,9 @@ class SwinPPMAEv2(nn.Module):
             v2:  self.cross_modal[i](t[a], t[b])         <- two modalities
         """
         t = list(tokens)                                  # shallow copy
-        for i, (a, b) in enumerate(self.MODAL_PAIRS):
-            t[a], t[b] = self.cross_modal[i](t[a], t[b])
+        if self.use_cma:
+            for i, (a, b) in enumerate(self.MODAL_PAIRS):
+                t[a], t[b] = self.cross_modal[i](t[a], t[b])
         fused = torch.cat(t, dim=-1)                      # (B, N, 4*D)
         return self.fuse(fused)                           # (B, N, D)
 
@@ -286,8 +291,9 @@ class SwinPPMAEv2(nn.Module):
         skips: List[torch.Tensor] = []
         saliency_maps: List[torch.Tensor] = []
         for stage, sal in zip(self.enc_stages, self.saliency):
-            feat, S = sal(feat)                 # predicts S, applies Eq 4.5
-            saliency_maps.append(S)
+            if self.use_sar:
+                feat, S = sal(feat)             # predicts S, applies Eq 4.5
+                saliency_maps.append(S)
             feat, skip = stage(feat)
             skips.append(skip)
 

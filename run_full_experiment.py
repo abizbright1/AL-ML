@@ -944,15 +944,27 @@ def main():
     ds = BraTSDataset(os.path.expanduser(args.data_dir),
                       patch_size=args.patch_size, sigma=args.sigma,
                       max_subjects=args.max_subjects)
-    n_train = int(.8 * len(ds))
-    train_ds, val_ds = torch.utils.data.random_split(
-        ds, [n_train, len(ds) - n_train],
-        generator=torch.Generator().manual_seed(args.seed))
+    # SUBJECT-level split: partition PATIENTS first, then collect their slices.
+    # A slice-level split puts adjacent ~1mm slices of one patient into both
+    # halves, so the model is scored on anatomy it already trained on.
+    import random as _random
+    _subj_of = [os.path.basename(ds.index[i][0]) for i in range(len(ds))]
+    _subjects = sorted(set(_subj_of))
+    _rng = _random.Random(args.seed)
+    _rng.shuffle(_subjects)
+    _n_val = max(1, int(round(0.2 * len(_subjects))))
+    _val_subj, _train_subj = set(_subjects[:_n_val]), set(_subjects[_n_val:])
+    assert not (_val_subj & _train_subj), "subject appears in both splits"
+
+    _tr_idx = [i for i, sj in enumerate(_subj_of) if sj in _train_subj]
+    _va_idx = [i for i, sj in enumerate(_subj_of) if sj in _val_subj]
+    train_ds = torch.utils.data.Subset(ds, _tr_idx)
+    val_ds   = torch.utils.data.Subset(ds, _va_idx)
+    print(f"  SUBJECTS  train {len(_train_subj)} | val {len(_val_subj)} | overlap 0")
     train_loader = torch.utils.data.DataLoader(train_ds, args.batch_size, shuffle=True)
     val_loader   = torch.utils.data.DataLoader(val_ds,   args.batch_size, shuffle=False)
     print(f"  train {len(train_ds)} slices | val {len(val_ds)} slices")
-    print("  WARNING: split is by SLICE, so patients appear in both sets.\n"
-          "           Treat all numbers below as provisional.\n", flush=True)
+    print("  Split is by SUBJECT — no patient appears in both sets.\n", flush=True)
 
     # ── Frozen segmentor ──────────────────────────────────────────────────
     print("=== SEGMENTOR (clean images) ===", flush=True)
