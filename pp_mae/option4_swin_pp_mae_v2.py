@@ -358,8 +358,11 @@ class SwinPPMAEv2Trainer:
         losses = self.loss_fn(pred, target, seg)
 
         mask = self._tumour_mask(seg)
-        l_sar = sum(self.sar_loss(S, mask) for S in saliency_maps) / max(
-            len(saliency_maps), 1)
+        if saliency_maps:
+            l_sar = sum(self.sar_loss(S, mask) for S in saliency_maps) / len(saliency_maps)
+        else:
+            # SAR ablated off -- no saliency maps exist, so the term is zero.
+            l_sar = torch.zeros((), device=pred.device)
 
         total = losses["total"] + self.lambda_sar * l_sar
         total.backward()
