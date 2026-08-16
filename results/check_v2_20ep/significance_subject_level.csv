@@ -1,0 +1,16 @@
+Region,Proposed,Baseline,N_subjects,Mean_diff,p_raw,p_holm,Significant_0.05
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v1 (mask-gated),20,-0.0031,0.701181,0.701181,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR + PathologyLoss,20,-0.0285,0.132727,0.39818,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR-lite (L1),20,-0.0520,0.00101662,0.0101662,yes
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],Uformer + PathologyLoss,20,-0.0383,0.132727,0.39818,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],Uformer-lite (L1),20,-0.0392,0.0695801,0.27832,no
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v1 (mask-gated),20,-0.1786,0.00117656,0.0105891,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR + PathologyLoss,20,-0.1588,0.00117656,0.0105891,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR-lite (L1),20,-0.1312,0.000629204,0.00817965,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],Uformer + PathologyLoss,20,-0.1764,0.000233229,0.00349844,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],Uformer-lite (L1),20,-0.0937,0.00841877,0.0420939,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v1 (mask-gated),20,-0.2032,0.000845855,0.0101503,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR + PathologyLoss,20,-0.1691,0.00139675,0.0105891,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR-lite (L1),20,-0.1499,0.000845855,0.0101503,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],Uformer + PathologyLoss,20,-0.1910,0.000351533,0.00492146,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],Uformer-lite (L1),20,-0.1159,0.00193099,0.0115859,yes

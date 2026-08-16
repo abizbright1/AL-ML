@@ -1,0 +1,22 @@
+{
+  "args": {
+    "data_dir": "/Users/oba007/Downloads/BraTS2021_data",
+    "epochs": 100,
+    "seg_epochs": 20,
+    "max_subjects": 200,
+    "patch_size": 96,
+    "sigma": 0.08,
+    "batch_size": 4,
+    "seed": 42,
+    "device": "mps",
+    "out": "results/clean_200subj_100ep",
+    "dump_slices": 48,
+    "ckpt_every": 25,
+    "figures_only": false
+  },
+  "device": "mps",
+  "git_sha": "0ed42b3dd42c06bebad7b1cdd1f86732d192c869",
+  "git_dirty": true,
+  "torch": "2.8.0",
+  "started": "2026-08-09 22:31:19"
+}
