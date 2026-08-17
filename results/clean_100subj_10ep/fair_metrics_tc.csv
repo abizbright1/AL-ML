@@ -1,0 +1,7 @@
+Method,Reported,Fair,Delta,FP_rate,N_scored,N_positive,N_negative,N_false_pos
+PP-MAE-v2 (mask-free) [PROPOSED],0.4553,0.5568,0.1016,0.3593,910,744,462,166
+PP-MAE-v1 (mask-gated),0.6399,0.6717,0.0318,0.0801,781,744,462,37
+SwinIR-lite (L1),0.5299,0.5598,0.0299,0.0909,786,744,462,42
+Uformer-lite (L1),0.5483,0.5711,0.0228,0.0671,775,744,462,31
+SwinIR + PathologyLoss,0.5999,0.6612,0.0613,0.1645,820,744,462,76
+Uformer + PathologyLoss,0.6196,0.6621,0.0425,0.1104,795,744,462,51
