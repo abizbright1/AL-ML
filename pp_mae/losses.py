@@ -471,12 +471,17 @@ class CrossModalConsistencyLoss(nn.Module):
         self.pairs = modality_pairs or self.DEFAULT_PAIRS
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        loss = torch.zeros(1, device=pred.device)
+        # NOTE: the original implementation pooled each modality to (1,1)
+        # before the cosine. Cosine similarity between two 1-D POSITIVE
+        # vectors is identically 1, so this term evaluated to exactly 0 in
+        # every run up to commit 8cdcae4. Comparing the flattened spatial
+        # maps is what the term was meant to do.
+        loss = torch.zeros((), device=pred.device)
         for i, j in self.pairs:
-            pi = F.adaptive_avg_pool2d(pred[:,   i:i+1], (1,1)).flatten(1)
-            pj = F.adaptive_avg_pool2d(pred[:,   j:j+1], (1,1)).flatten(1)
-            ti = F.adaptive_avg_pool2d(target[:, i:i+1], (1,1)).flatten(1)
-            tj = F.adaptive_avg_pool2d(target[:, j:j+1], (1,1)).flatten(1)
+            pi = pred[:,   i].flatten(1)      # (B, H*W)
+            pj = pred[:,   j].flatten(1)
+            ti = target[:, i].flatten(1)
+            tj = target[:, j].flatten(1)
             loss = loss + F.mse_loss(F.cosine_similarity(pi, pj, dim=1),
                                      F.cosine_similarity(ti, tj, dim=1))
         return loss / max(len(self.pairs), 1)
