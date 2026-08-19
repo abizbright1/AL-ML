@@ -1,0 +1,25 @@
+Region,Proposed,Baseline,N_subjects,Mean_diff,p_raw,p_holm,Significant_0.05
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v1 (mask-gated),20,-0.0555,9.53674e-06,0.000228882,yes
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],"PP-MAE-v2 (CMA only, no SAR)",20,-0.0174,0.164957,0.699097,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],"PP-MAE-v2 (SAR only, no CMA)",20,+0.0167,0.0973072,0.699097,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v2 (neither module),20,-0.0053,0.430433,1,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR + PathologyLoss,20,-0.0225,0.0582581,0.699097,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR-lite (L1),20,-0.0218,0.0637226,0.699097,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],Uformer + PathologyLoss,20,-0.0368,0.00422096,0.0633144,no
+DICE_WT,PP-MAE-v2 (mask-free) [PROPOSED],Uformer-lite (L1),20,-0.0199,0.089695,0.699097,no
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v1 (mask-gated),20,-0.1639,0.000463394,0.0083411,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],"PP-MAE-v2 (CMA only, no SAR)",20,-0.0093,0.521673,1,no
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],"PP-MAE-v2 (SAR only, no CMA)",20,+0.0465,0.000723953,0.0115833,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v2 (neither module),20,+0.0274,0.0766179,0.699097,no
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR + PathologyLoss,20,-0.1218,0.000209808,0.00440598,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR-lite (L1),20,-0.0503,0.107466,0.699097,no
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],Uformer + PathologyLoss,20,-0.1360,0.000182182,0.004008,yes
+DICE_TC,PP-MAE-v2 (mask-free) [PROPOSED],Uformer-lite (L1),20,-0.0548,0.0585733,0.699097,no
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v1 (mask-gated),20,-0.1809,0.000398142,0.00756471,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],"PP-MAE-v2 (CMA only, no SAR)",20,-0.0100,0.334138,1,no
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],"PP-MAE-v2 (SAR only, no CMA)",20,+0.0399,0.000538517,0.0091548,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],PP-MAE-v2 (neither module),20,+0.0284,0.0835564,0.699097,no
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR + PathologyLoss,20,-0.1372,0.000250216,0.00500432,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],SwinIR-lite (L1),20,-0.0732,0.0100095,0.140134,no
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],Uformer + PathologyLoss,20,-0.1602,0.000155096,0.0035672,yes
+DICE_ET,PP-MAE-v2 (mask-free) [PROPOSED],Uformer-lite (L1),20,-0.0683,0.0329382,0.428197,no
