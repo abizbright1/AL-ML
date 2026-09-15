@@ -54,6 +54,7 @@ import argparse
 import csv
 import json
 import os
+import random
 import subprocess
 import sys
 import time
@@ -109,7 +110,58 @@ def parse_args():
                    help='Also save an intermediate checkpoint every N epochs')
     p.add_argument('--figures_only', action='store_true',
                    help='Skip training; redraw figures from saved .npz dumps')
+    p.add_argument('--models', type=str, default=None,
+                   help="Comma-separated 'short' labels to train, e.g. "
+                        "'SwinIR-L1,Uformer-L1,SwinIR+PL,Uformer+PL'. "
+                        "Default: every model in build_models().")
     return p.parse_args()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Reproducibility
+# ═══════════════════════════════════════════════════════════════════════════
+
+def set_all_seeds(seed: int) -> torch.Generator:
+    """Seed every RNG this run touches; return a seeded DataLoader generator.
+
+    The previous code seeded only torch and numpy. Three further sources of
+    randomness were left free:
+      * python's stdlib `random` (used by the subject-split shuffle)
+      * torch.cuda (irrelevant on MPS, included for portability)
+      * each DataLoader's own generator, which drives shuffle order
+
+    NOTE ON MPS: Apple's Metal backend provides no determinism guarantee and
+    has no equivalent of cudnn.deterministic. Two runs with the same seed on
+    MPS can still differ slightly. The seed makes runs comparable, not
+    bit-identical. This is stated in the run banner.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    g = torch.Generator()
+    g.manual_seed(seed)
+    return g
+
+
+def _worker_init(worker_id: int) -> None:
+    """Give each DataLoader worker its own reproducible RNG stream.
+
+    Inert while num_workers=0 (the current default); present so that raising
+    num_workers later does not silently reintroduce nondeterminism.
+    """
+    s = torch.initial_seed() % (2 ** 32)
+    np.random.seed(s + worker_id)
+    random.seed(s + worker_id)
+
+
+def seed_stamped(out_dir: str, seed: int) -> str:
+    """Append _seed{N} unless the path already identifies a seed."""
+    return out_dir if 'seed' in os.path.basename(out_dir).lower() \
+        else f'{out_dir}_seed{seed}'
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -943,6 +995,8 @@ def make_all_figures(out_dir, sigma, results=None, histories=None):
 
 def main():
     args = parse_args()
+    if not args.figures_only:
+        args.out = seed_stamped(args.out, args.seed)
     os.makedirs(args.out, exist_ok=True)
 
     if args.figures_only:
@@ -957,11 +1011,12 @@ def main():
     device = args.device or ('cuda' if torch.cuda.is_available()
                              else 'mps' if getattr(torch.backends, 'mps', None)
                              and torch.backends.mps.is_available() else 'cpu')
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
+    _loader_gen = set_all_seeds(args.seed)
 
     print(f"\nDevice   : {device}")
     print(f"Epochs   : {args.epochs}   Seg epochs: {args.seg_epochs}")
+    print(f"Seed     : {args.seed}"
+          f"{'   (MPS: seeded, not bit-deterministic)' if device == 'mps' else ''}")
     print(f"Git SHA  : {git_sha()[:8]}{'  (DIRTY)' if git_dirty() else ''}")
     print(f"Output   : {args.out}\n")
 
@@ -991,8 +1046,12 @@ def main():
     train_ds = torch.utils.data.Subset(ds, _tr_idx)
     val_ds   = torch.utils.data.Subset(ds, _va_idx)
     print(f"  SUBJECTS  train {len(_train_subj)} | val {len(_val_subj)} | overlap 0")
-    train_loader = torch.utils.data.DataLoader(train_ds, args.batch_size, shuffle=True)
-    val_loader   = torch.utils.data.DataLoader(val_ds,   args.batch_size, shuffle=False)
+    train_loader = torch.utils.data.DataLoader(
+        train_ds, args.batch_size, shuffle=True,
+        generator=_loader_gen, worker_init_fn=_worker_init)
+    val_loader   = torch.utils.data.DataLoader(
+        val_ds,   args.batch_size, shuffle=False,
+        worker_init_fn=_worker_init)
     print(f"  train {len(train_ds)} slices | val {len(val_ds)} slices")
     print("  Split is by SUBJECT — no patient appears in both sets.\n", flush=True)
 
@@ -1019,6 +1078,17 @@ def main():
 
     # ── Train every model ─────────────────────────────────────────────────
     specs, results, histories, all_slices = build_models(device), [], {}, []
+
+    if args.models:
+        keep = {m.strip() for m in args.models.split(',') if m.strip()}
+        avail = {sp['short'] for sp in specs.values()}
+        missing = keep - avail
+        if missing:
+            sys.exit(f"--models: unknown label(s) {sorted(missing)}. "
+                     f"Available: {sorted(avail)}")
+        specs = {k: v for k, v in specs.items() if v['short'] in keep}
+        print(f"  training {len(specs)} of {len(avail)} models: "
+              f"{sorted(sp['short'] for sp in specs.values())}\n", flush=True)
 
     for name, spec in specs.items():
         print(f"\n{'='*64}\n  {name}\n{'='*64}", flush=True)
