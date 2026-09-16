@@ -1,0 +1,23 @@
+{
+  "args": {
+    "data_dir": "/Users/oba007/Downloads/BraTS2021_data",
+    "epochs": 10,
+    "seg_epochs": 10,
+    "max_subjects": 100,
+    "patch_size": 96,
+    "sigma": 0.08,
+    "batch_size": 4,
+    "seed": 1,
+    "device": "mps",
+    "out": "/Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed1",
+    "dump_slices": 48,
+    "ckpt_every": 25,
+    "figures_only": false,
+    "models": "SwinIR-L1"
+  },
+  "device": "mps",
+  "git_sha": "5f4e679e0bd3f1acc065b860e6450d7a7001cdb0",
+  "git_dirty": true,
+  "torch": "2.8.0",
+  "started": "2026-09-15 21:02:01"
+}

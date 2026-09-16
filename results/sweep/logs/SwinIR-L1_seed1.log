@@ -1,0 +1,8 @@
+
+Device   : mps
+Epochs   : 10   Seg epochs: 10
+Seed     : 1   (MPS: seeded, not bit-deterministic)
+Git SHA  : 5f4e679e  (DIRTY)
+Output   : /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed1
+
+[BraTSDataset] Found 100 subjects under /Users/oba007/Downloads/BraTS2021_data
