@@ -1,0 +1,117 @@
+============================================================================
+  MULTI-SEED ANALYSIS — dice_wt
+============================================================================
+  tidy file : results/real_analysis/tidy_ablation9.csv
+  contrast  : PathologyLoss - L1
+  seeds     : [42]  (k=1)
+  backbones : ['SwinIR', 'Uformer']
+  alpha     : 0.05    equivalence margin: +/-0.02
+  !! Fewer than 3 seeds: SD and the run-level test are not
+     meaningful. Finish the sweep before quoting these numbers.
+
+----------------------------------------------------------------------------
+(a) PER-SEED EFFECT, SD ACROSS SEEDS, BOOTSTRAP 95% CI
+----------------------------------------------------------------------------
+    CIs resample subjects (clusters), 95% percentile bootstrap,
+    10000 resamples, bootstrap RNG seed 0.
+
+  SwinIR
+      seed  n_subj     mean d   SD(subj)         95% CI (bootstrap)
+        42      20    +0.0007     0.0196         [-0.0073, +0.0095]
+                   ----------
+    across seeds: mean +0.0007   SD n/a   range [+0.0007, +0.0007]
+
+  Uformer
+      seed  n_subj     mean d   SD(subj)         95% CI (bootstrap)
+        42      20    +0.0169     0.0326         [+0.0043, +0.0324]
+                   ----------
+    across seeds: mean +0.0169   SD n/a   range [+0.0169, +0.0169]
+
+----------------------------------------------------------------------------
+(b) MIXED-EFFECTS MODEL  (random intercepts: subject, seed)
+----------------------------------------------------------------------------
+    value ~ loss + (1|subject) + (1|seed)
+
+  SwinIR
+    statsmodels/pandas unavailable (pandas); using fallback.
+    method    : FALLBACK — run-level paired test on the 1 per-seed mean deltas
+                (valid but low-powered; the seed is the unit of replication)
+    mean      : 0.0007   SD n/a
+    t-test p  : n/a
+    Wilcoxon p: n/a   (k<6: min attainable two-sided p is 0.0625, so this test CANNOT reach 0.05)
+
+  Uformer
+    statsmodels/pandas unavailable (pandas); using fallback.
+    method    : FALLBACK — run-level paired test on the 1 per-seed mean deltas
+                (valid but low-powered; the seed is the unit of replication)
+    mean      : 0.0169   SD n/a
+    t-test p  : n/a
+    Wilcoxon p: n/a   (k<6: min attainable two-sided p is 0.0625, so this test CANNOT reach 0.05)
+
+----------------------------------------------------------------------------
+(c) EQUIVALENCE (TOST)  and  (d) MATCHED-PAIRS EFFECT SIZE
+----------------------------------------------------------------------------
+    Both computed on per-subject deltas averaged over seeds, so each
+    subject contributes exactly one paired observation.
+
+  SwinIR   (n = 20 subjects)
+    mean delta       : +0.0007   median -0.0020
+    Wilcoxon p       : 0.6742  (two-sided, subject-level)
+    rank-biserial r  : -0.114  (small, 20 non-zero pairs)
+    TOST p_lower     : 7.099e-05   (H0: delta <= -0.02)
+    TOST p_upper     : 0.0001517   (H0: delta >= 0.02)
+    TOST p (max)     : 0.0001517   -> equivalent at alpha=0.05
+    90% CI           : [-0.0068, +0.0083]
+    VERDICT          : EQUIVALENT. Absence of effect is positively demonstrated, not merely unproven: the true difference is inside +/-0.02 dice_wt. This is the claim to make instead of "no significant difference". 90% CI [-0.0068, +0.0083], margin +/-0.02.
+
+  Uformer   (n = 20 subjects)
+    mean delta       : +0.0169   median +0.0039
+    Wilcoxon p       : 0.0532  (two-sided, subject-level)
+    rank-biserial r  : +0.495  (medium, 20 non-zero pairs)
+    TOST p_lower     : 3.537e-05   (H0: delta <= -0.02)
+    TOST p_upper     : 0.3371   (H0: delta >= 0.02)
+    TOST p (max)     : 0.3371   -> NOT equivalent at alpha=0.05
+    90% CI           : [+0.0043, +0.0295]
+    VERDICT          : INCONCLUSIVE. The study can neither detect a difference nor rule out one as large as 0.02 dice_wt — an underpowered result, which is NOT evidence of equivalence. Say so, or add seeds or subjects. 90% CI [+0.0043, +0.0295], margin +/-0.02.
+
+============================================================================
+(e) PASTE-READY MANUSCRIPT TEXT
+============================================================================
+
+  --- Methods ---
+  Every configuration was trained 1 times with independent random
+  seeds (42); the seed controls weight
+  initialisation, the subject-level train/validation split and batch
+  ordering. All randomness is seeded through a single entry point (set_all_seeds),
+  including each DataLoader generator. Runs on Apple MPS are seeded but not
+  bit-deterministic, as the Metal backend offers no determinism guarantee;
+  seeding therefore makes runs comparable rather than identical.
+  Metrics are averaged within a subject before any test, so the subject,
+  not the slice, is the unit of analysis. Effects are paired differences
+  (PathologyLoss minus L1) on the same subjects. Uncertainty is a
+  percentile bootstrap over subjects (10000 resamples). Inference uses
+  a run-level paired test on the per-seed mean differences, the seed being
+  the unit of replication.
+  Equivalence was assessed by two one-sided tests against an a-priori
+  margin of 0.02 dice_wt, so that the absence of an effect is
+  reported as a positive finding rather than as a failure to reject.
+
+  --- Results ---
+  On SwinIR, PathologyLoss changed dice_wt by +0.001
+  (mean over 20 subjects; across-seed SD n/a, k=1 seeds;
+  90% CI [-0.007, +0.008]; Wilcoxon p = 0.674,
+  rank-biserial r = -0.11; TOST against +/-0.02: p < 0.001,
+  equivalence supported).
+
+  On Uformer, PathologyLoss changed dice_wt by +0.017
+  (mean over 20 subjects; across-seed SD n/a, k=1 seeds;
+  90% CI [+0.004, +0.030]; Wilcoxon p = 0.053,
+  rank-biserial r = +0.50; TOST against +/-0.02: p = 0.337,
+  equivalence not supported).
+
+  --- Limitation to state ---
+  For Uformer, the data neither detect a difference nor
+  exclude one of 0.02 dice_wt. This is reported as inconclusive;
+  it is not evidence that the two objectives perform alike.
+
+============================================================================

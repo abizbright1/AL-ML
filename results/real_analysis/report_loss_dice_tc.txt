@@ -1,0 +1,116 @@
+============================================================================
+  MULTI-SEED ANALYSIS — dice_tc
+============================================================================
+  tidy file : results/real_analysis/tidy_ablation9.csv
+  contrast  : PathologyLoss - L1
+  seeds     : [42]  (k=1)
+  backbones : ['SwinIR', 'Uformer']
+  alpha     : 0.05    equivalence margin: +/-0.02
+  !! Fewer than 3 seeds: SD and the run-level test are not
+     meaningful. Finish the sweep before quoting these numbers.
+
+----------------------------------------------------------------------------
+(a) PER-SEED EFFECT, SD ACROSS SEEDS, BOOTSTRAP 95% CI
+----------------------------------------------------------------------------
+    CIs resample subjects (clusters), 95% percentile bootstrap,
+    10000 resamples, bootstrap RNG seed 0.
+
+  SwinIR
+      seed  n_subj     mean d   SD(subj)         95% CI (bootstrap)
+        42      20    +0.0715     0.0839         [+0.0394, +0.1118]
+                   ----------
+    across seeds: mean +0.0715   SD n/a   range [+0.0715, +0.0715]
+
+  Uformer
+      seed  n_subj     mean d   SD(subj)         95% CI (bootstrap)
+        42      20    +0.0812     0.1015         [+0.0384, +0.1252]
+                   ----------
+    across seeds: mean +0.0812   SD n/a   range [+0.0812, +0.0812]
+
+----------------------------------------------------------------------------
+(b) MIXED-EFFECTS MODEL  (random intercepts: subject, seed)
+----------------------------------------------------------------------------
+    value ~ loss + (1|subject) + (1|seed)
+
+  SwinIR
+    statsmodels/pandas unavailable (pandas); using fallback.
+    method    : FALLBACK — run-level paired test on the 1 per-seed mean deltas
+                (valid but low-powered; the seed is the unit of replication)
+    mean      : 0.0715   SD n/a
+    t-test p  : n/a
+    Wilcoxon p: n/a   (k<6: min attainable two-sided p is 0.0625, so this test CANNOT reach 0.05)
+
+  Uformer
+    statsmodels/pandas unavailable (pandas); using fallback.
+    method    : FALLBACK — run-level paired test on the 1 per-seed mean deltas
+                (valid but low-powered; the seed is the unit of replication)
+    mean      : 0.0812   SD n/a
+    t-test p  : n/a
+    Wilcoxon p: n/a   (k<6: min attainable two-sided p is 0.0625, so this test CANNOT reach 0.05)
+
+----------------------------------------------------------------------------
+(c) EQUIVALENCE (TOST)  and  (d) MATCHED-PAIRS EFFECT SIZE
+----------------------------------------------------------------------------
+    Both computed on per-subject deltas averaged over seeds, so each
+    subject contributes exactly one paired observation.
+
+  SwinIR   (n = 20 subjects)
+    mean delta       : +0.0715   median +0.0524
+    Wilcoxon p       : < 0.0001  (two-sided, subject-level)
+    rank-biserial r  : +0.905  (large, 20 non-zero pairs)
+    TOST p_lower     : 5.221e-05   (H0: delta <= -0.02)
+    TOST p_upper     : 0.9936   (H0: delta >= 0.02)
+    TOST p (max)     : 0.9936   -> NOT equivalent at alpha=0.05
+    90% CI           : [+0.0390, +0.1039]
+    VERDICT          : DIFFERENT AND NON-TRIVIAL. The effect is statistically detectable and cannot be ruled larger than the 0.02 dice_tc margin. Report it as a real difference. 90% CI [+0.0390, +0.1039], margin +/-0.02.
+
+  Uformer   (n = 20 subjects)
+    mean delta       : +0.0812   median +0.0477
+    Wilcoxon p       : 0.0025  (two-sided, subject-level)
+    rank-biserial r  : +0.789  (large, 19 non-zero pairs)
+    TOST p_lower     : 0.0001344   (H0: delta <= -0.02)
+    TOST p_upper     : 0.9929   (H0: delta >= 0.02)
+    TOST p (max)     : 0.9929   -> NOT equivalent at alpha=0.05
+    90% CI           : [+0.0420, +0.1205]
+    VERDICT          : DIFFERENT AND NON-TRIVIAL. The effect is statistically detectable and cannot be ruled larger than the 0.02 dice_tc margin. Report it as a real difference. 90% CI [+0.0420, +0.1205], margin +/-0.02.
+
+============================================================================
+(e) PASTE-READY MANUSCRIPT TEXT
+============================================================================
+
+  --- Methods ---
+  Every configuration was trained 1 times with independent random
+  seeds (42); the seed controls weight
+  initialisation, the subject-level train/validation split and batch
+  ordering. All randomness is seeded through a single entry point (set_all_seeds),
+  including each DataLoader generator. Runs on Apple MPS are seeded but not
+  bit-deterministic, as the Metal backend offers no determinism guarantee;
+  seeding therefore makes runs comparable rather than identical.
+  Metrics are averaged within a subject before any test, so the subject,
+  not the slice, is the unit of analysis. Effects are paired differences
+  (PathologyLoss minus L1) on the same subjects. Uncertainty is a
+  percentile bootstrap over subjects (10000 resamples). Inference uses
+  a run-level paired test on the per-seed mean differences, the seed being
+  the unit of replication.
+  Equivalence was assessed by two one-sided tests against an a-priori
+  margin of 0.02 dice_tc, so that the absence of an effect is
+  reported as a positive finding rather than as a failure to reject.
+
+  --- Results ---
+  On SwinIR, PathologyLoss changed dice_tc by +0.071
+  (mean over 20 subjects; across-seed SD n/a, k=1 seeds;
+  90% CI [+0.039, +0.104]; Wilcoxon p < 0.001,
+  rank-biserial r = +0.90; TOST against +/-0.02: p = 0.994,
+  equivalence not supported).
+
+  On Uformer, PathologyLoss changed dice_tc by +0.081
+  (mean over 20 subjects; across-seed SD n/a, k=1 seeds;
+  90% CI [+0.042, +0.120]; Wilcoxon p = 0.003,
+  rank-biserial r = +0.79; TOST against +/-0.02: p = 0.993,
+  equivalence not supported).
+
+  --- Limitation to state ---
+  Every contrast reached a decision (difference or equivalence) at the
+  stated margin; no contrast is left inconclusive.
+
+============================================================================
