@@ -7,9 +7,9 @@
     "patch_size": 96,
     "sigma": 0.08,
     "batch_size": 4,
-    "seed": 1,
+    "seed": 5,
     "device": "mps",
-    "out": "/Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed1",
+    "out": "/Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed5",
     "dump_slices": 48,
     "ckpt_every": 25,
     "figures_only": false,
@@ -19,5 +19,5 @@
   "git_sha": "cf3329e47839bb217860de884f69d62095d8b752",
   "git_dirty": true,
   "torch": "2.8.0",
-  "started": "2026-09-16 03:36:13"
+  "started": "2026-09-16 12:53:54"
 }

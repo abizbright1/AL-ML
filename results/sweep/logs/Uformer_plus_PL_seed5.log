@@ -1,0 +1,68 @@
+
+Device   : mps
+Epochs   : 10   Seg epochs: 10
+Seed     : 5   (MPS: seeded, not bit-deterministic)
+Git SHA  : cf3329e4  (DIRTY)
+Output   : /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5
+
+[BraTSDataset] Found 100 subjects under /Users/oba007/Downloads/BraTS2021_data
+[BraTSDataset] Total slices in index: 5960
+  SUBJECTS  train 80 | val 20 | overlap 0
+  train 4759 slices | val 1201 slices
+  Split is by SUBJECT — no patient appears in both sets.
+
+=== SEGMENTOR (clean images) ===
+  [seg] Ep  1/10  loss=0.2611
+  [seg] Ep  5/10  loss=0.0976
+  [seg] Ep 10/10  loss=0.0754
+Segmentor frozen.
+
+  training 1 of 9 models: ['Uformer+PL']
+
+
+================================================================
+  Uformer + PathologyLoss
+================================================================
+    Ep   1/10  loss=0.4774
+    Ep   5/10  loss=0.2327
+    Ep  10/10  loss=0.2129
+    PSNR=31.07  SSIM=0.978  Dice_TC=0.544  Dice_ET=0.545
+    321/1201 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/checkpoints/UformerplusPL.pt    [72.7 min]
+
+================================================================================
+  RESULTS
+================================================================================
+Method                            PSNR    SSIM   Dice_WT   Dice_TC   Dice_ET  mask?
+-----------------------------------------------------------------------------------
+  Uformer+PL                     31.07   0.978     0.782     0.544     0.545      -
+===================================================================================
+
+=== FIGURES ===
+
+  figures use slice 0 (subject BraTS2021_00003) — chosen for max disagreement
+
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig01_data_sample.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig02_noise_added.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig03_denoised_all_models.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig04_error_maps_all_models.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig05_segmentation_all_models.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig09_tumour_regions.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig10_noise_progression.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig11_pathology_weight_map.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig12_loss_heatmap.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig13_pipeline.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig14_cross_modal.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig06_metrics_bars.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig07_psnr_paradox.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig15_results_table.png
+  saved /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5/figures/fig08_loss_curves.png
+
+=== SUBJECT-LEVEL SIGNIFICANCE ===
+  no [PROPOSED] method found — skipping stats
+
+All outputs in /Users/oba007/AL-ML/results/sweep/Uformer_plus_PL_seed5
+  checkpoints/   reload with load_checkpoint(path)
+  predictions/   redraw figures with --figures_only
+  figures/       9 figures, all five models
+

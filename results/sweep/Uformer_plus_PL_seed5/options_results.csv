@@ -1,0 +1,2 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+Uformer + PathologyLoss,Uformer+PL,31.0718,0.9784,0.0891,0.7821,0.5445,0.5448,1201,321,False

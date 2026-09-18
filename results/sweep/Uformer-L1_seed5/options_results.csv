@@ -1,0 +1,2 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+Uformer-lite (L1),Uformer-L1,31.2699,0.9794,0.0870,0.7873,0.5786,0.5990,1201,400,False

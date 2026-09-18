@@ -1,0 +1,70 @@
+
+Device   : mps
+Epochs   : 10   Seg epochs: 10
+Seed     : 3   (MPS: seeded, not bit-deterministic)
+Git SHA  : cf3329e4  (DIRTY)
+Output   : /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3
+
+[BraTSDataset] Found 100 subjects under /Users/oba007/Downloads/BraTS2021_data
+[BraTSDataset] Total slices in index: 5960
+  SUBJECTS  train 80 | val 20 | overlap 0
+  train 4783 slices | val 1177 slices
+  Split is by SUBJECT — no patient appears in both sets.
+
+=== SEGMENTOR (clean images) ===
+  [seg] Ep  1/10  loss=0.2772
+  [seg] Ep  5/10  loss=0.1026
+  [seg] Ep 10/10  loss=0.0829
+Segmentor frozen.
+
+  training 1 of 9 models: ['SwinIR-L1']
+
+
+================================================================
+  SwinIR-lite (L1)
+================================================================
+    Ep   1/10  loss=0.0328
+    Ep   5/10  loss=0.0210
+    Ep  10/10  loss=0.0196
+    PSNR=31.18  SSIM=0.978  Dice_TC=0.386  Dice_ET=0.390
+    480/1177 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/checkpoints/SwinIR-L1.pt    [74.2 min]
+
+================================================================================
+  RESULTS
+================================================================================
+Method                            PSNR    SSIM   Dice_WT   Dice_TC   Dice_ET  mask?
+-----------------------------------------------------------------------------------
+  SwinIR-L1                      31.18   0.978     0.747     0.386     0.390      -
+===================================================================================
+
+=== FIGURES ===
+/Users/oba007/AL-ML/run_full_experiment.py:508: RuntimeWarning: All-NaN slice encountered
+  spread = np.nanmax(stacked, 0) - np.nanmin(stacked, 0)
+
+  figures use slice 0 (subject BraTS2021_00000) — chosen for max disagreement
+
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig01_data_sample.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig02_noise_added.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig03_denoised_all_models.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig04_error_maps_all_models.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig05_segmentation_all_models.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig09_tumour_regions.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig10_noise_progression.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig11_pathology_weight_map.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig12_loss_heatmap.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig13_pipeline.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig14_cross_modal.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig06_metrics_bars.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig07_psnr_paradox.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig15_results_table.png
+  saved /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3/figures/fig08_loss_curves.png
+
+=== SUBJECT-LEVEL SIGNIFICANCE ===
+  no [PROPOSED] method found — skipping stats
+
+All outputs in /Users/oba007/AL-ML/results/sweep/SwinIR-L1_seed3
+  checkpoints/   reload with load_checkpoint(path)
+  predictions/   redraw figures with --figures_only
+  figures/       9 figures, all five models
+

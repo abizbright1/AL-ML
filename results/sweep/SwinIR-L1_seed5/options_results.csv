@@ -1,0 +1,2 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+SwinIR-lite (L1),SwinIR-L1,31.0868,0.9782,0.0886,0.7864,0.5532,0.5656,1201,360,False

@@ -1,0 +1,2 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+SwinIR + PathologyLoss,SwinIR+PL,30.8302,0.9768,0.0941,0.8086,0.5744,0.5367,1202,201,False

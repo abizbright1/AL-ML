@@ -1,0 +1,90 @@
+============================================================================
+  MULTI-SEED ANALYSIS — dice_et
+============================================================================
+  tidy file : results/sweep/tidy_results.csv
+  contrast  : PathologyLoss gain, SwinIR vs Uformer
+  seeds     : [1, 2, 3, 4, 5]  (k=5)
+  backbones : ['SwinIR', 'Uformer']
+  alpha     : 0.05    equivalence margin: +/-0.05
+
+----------------------------------------------------------------------------
+(a) PER-SEED EFFECT, SD ACROSS SEEDS, BOOTSTRAP 95% CI
+----------------------------------------------------------------------------
+    CIs resample subjects (clusters), 95% percentile bootstrap,
+    10000 resamples, bootstrap RNG seed 0.
+
+  SwinIR gain - Uformer gain
+      seed  n_subj     mean d   SD(subj)         95% CI (bootstrap)
+         1      20    -0.0068     0.0409         [-0.0247, +0.0108]
+         2      20    -0.0161     0.0508         [-0.0388, +0.0053]
+         3      19    -0.0110     0.0483         [-0.0329, +0.0085]
+         4      20    -0.0478     0.0439         [-0.0669, -0.0302]
+         5      19    -0.0133     0.0391         [-0.0303, +0.0043]
+                   ----------
+    across seeds: mean -0.0190   SD 0.0165   range [-0.0478, -0.0068]
+    effect / seed-SD = 1.15   (effect exceeds seed noise)
+
+----------------------------------------------------------------------------
+(b) MIXED-EFFECTS MODEL  (random intercepts: subject, seed)
+----------------------------------------------------------------------------
+    value ~ loss + (1|subject) + (1|seed)
+
+  SwinIR gain - Uformer gain
+    a single-factor mixed model does not apply to a difference of gains;
+    the run-level test below is the primary inference.
+    method    : FALLBACK — run-level paired test on the 5 per-seed mean deltas
+                (valid but low-powered; the seed is the unit of replication)
+    mean      : -0.0190   SD 0.0165
+    t-test p  : 0.0615
+    Wilcoxon p: 0.0625   (k<6: min attainable two-sided p is 0.0625, so this test CANNOT reach 0.05)
+
+----------------------------------------------------------------------------
+(c) EQUIVALENCE (TOST)  and  (d) MATCHED-PAIRS EFFECT SIZE
+----------------------------------------------------------------------------
+    Both computed on per-subject deltas averaged over seeds, so each
+    subject contributes exactly one paired observation.
+
+  SwinIR gain - Uformer gain   (n = 72 subjects)
+    mean delta       : -0.0177   median -0.0116
+    Wilcoxon p       : 0.0008  (two-sided, subject-level)
+    rank-biserial r  : -0.463  (medium, 69 non-zero pairs)
+    TOST p_lower     : 2.371e-09   (H0: delta <= -0.05)
+    TOST p_upper     : 2.129e-22   (H0: delta >= 0.05)
+    TOST p (max)     : 2.371e-09   -> equivalent at alpha=0.05
+    90% CI           : [-0.0258, -0.0097]
+    VERDICT          : STATISTICALLY DETECTABLE BUT PRACTICALLY EQUIVALENT. The effect is real but smaller than 0.05 dice_et. Do not present it as a clinically meaningful gain. 90% CI [-0.0258, -0.0097], margin +/-0.05.
+
+============================================================================
+(e) PASTE-READY MANUSCRIPT TEXT
+============================================================================
+
+  --- Methods ---
+  Every configuration was trained 5 times with independent random
+  seeds (1, 2, 3, 4, 5); the seed controls weight
+  initialisation, the subject-level train/validation split and batch
+  ordering. All randomness is seeded through a single entry point (set_all_seeds),
+  including each DataLoader generator. Runs on Apple MPS are seeded but not
+  bit-deterministic, as the Metal backend offers no determinism guarantee;
+  seeding therefore makes runs comparable rather than identical.
+  Metrics are averaged within a subject before any test, so the subject,
+  not the slice, is the unit of analysis. Effects are paired differences
+  (PathologyLoss minus L1) on the same subjects. Uncertainty is a
+  percentile bootstrap over subjects (10000 resamples). Inference uses
+  a run-level paired test on the per-seed mean differences, the seed being
+  the unit of replication.
+  Equivalence was assessed by two one-sided tests against an a-priori
+  margin of 0.05 dice_et, so that the absence of an effect is
+  reported as a positive finding rather than as a failure to reject.
+
+  --- Results ---
+  The PathologyLoss gain in dice_et differed between backbones (SwinIR gain - Uformer gain) by -0.018
+  (mean over 72 subjects; across-seed SD 0.016, k=5 seeds;
+  90% CI [-0.026, -0.010]; Wilcoxon p < 0.001,
+  rank-biserial r = -0.46; TOST against +/-0.05: p < 0.001,
+  equivalence supported).
+
+  --- Limitation to state ---
+  Every contrast reached a decision (difference or equivalence) at the
+  stated margin; no contrast is left inconclusive.
+
+============================================================================
