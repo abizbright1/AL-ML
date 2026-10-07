@@ -80,9 +80,7 @@ from option_baselines import (
     UformerLite, UformerTrainer, UformerPathologyTrainer,
 )
 from segmentor import UNetSegmentor, SegTrainer
-from comparison_losses import (CurrentPathologyLossTrainer, FlatROITrainer,
-                               L1SSIMTrainer,
-                               ROIFeatureTrainer, TaskFeedbackTrainer)
+from comparison_losses import make_arm
 from brats_loader import BraTSDataset
 from evaluation import psnr, ssim_numpy, nrmse
 
@@ -355,8 +353,7 @@ def build_models(device: str,
         'SwinIR + PathologyLoss (current, nested)': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
-                m, device=device, lr=1e-4, mode='nested'),
+            'trainer_fn': lambda m: make_arm('pathology', m, device=device, lr=1e-4),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'short': 'SwinIR+PLcur',
@@ -364,33 +361,37 @@ def build_models(device: str,
         'Uformer + PathologyLoss (current, nested)': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
-                m, device=device, lr=1e-4, mode='nested'),
+            'trainer_fn': lambda m: make_arm('pathology', m, device=device, lr=1e-4),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'short': 'Uformer+PLcur',
         },
 
-        # ── Conventional structure-aware competitor ───────────────────────
+        # ── MATCHED BASE CONTROL — the causal control for PathologyLoss ───
+        # Carries every NON-pathology term the as-run treatment carries
+        # (L1 + 0.5*SSIM + 0.5*cross-modal) and nothing else. The published
+        # comparison used pure L1, which differs from the treatment in four
+        # ways at once and therefore cannot attribute anything to the
+        # pathology term. Contrast PathologyLoss against THIS, not L1.
         # Answers the question asked before any lesion argument: does
         # PathologyLoss beat simply using a stronger standard objective? It
         # matters doubly because the ORIGINAL +PathologyLoss trainers already
         # carry an SSIM term at 0.5 while their L1 controls do not.
-        'SwinIR + SSIM': {
+        'SwinIR + matched base (no pathology) [CONTROL]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: L1SSIMTrainer(m, device=device, lr=1e-4),
+            'trainer_fn': lambda m: make_arm('base', m, device=device, lr=1e-4),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'SwinIR+SSIM',
+            'short': 'SwinIR-Base',
         },
-        'Uformer + SSIM': {
+        'Uformer + matched base (no pathology) [CONTROL]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: L1SSIMTrainer(m, device=device, lr=1e-4),
+            'trainer_fn': lambda m: make_arm('base', m, device=device, lr=1e-4),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'Uformer+SSIM',
+            'short': 'Uformer-Base',
         },
 
         # ── ABLATION ONLY — not a correction to the primary method ────────
@@ -400,8 +401,7 @@ def build_models(device: str,
         'SwinIR + PathologyLoss (disjoint) [ABLATION]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
-                m, device=device, lr=1e-4, mode='disjoint'),
+            'trainer_fn': lambda m: make_arm('pathology-disjoint', m, device=device, lr=1e-4),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'short': 'SwinIR+PLdisj',
@@ -409,8 +409,7 @@ def build_models(device: str,
         'Uformer + PathologyLoss (disjoint) [ABLATION]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
-                m, device=device, lr=1e-4, mode='disjoint'),
+            'trainer_fn': lambda m: make_arm('pathology-disjoint', m, device=device, lr=1e-4),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'short': 'Uformer+PLdisj',
@@ -446,8 +445,7 @@ def build_models(device: str,
         'SwinIR + ROI feature [LIDnet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: ROIFeatureTrainer(
-                m, seg_aux, device=device, lr=1e-4, lambda_feat=1.0),
+            'trainer_fn': lambda m: make_arm('roifeature', m, device=device, lr=1e-4, segmentor=seg_aux),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'needs_seg_aux': True,
@@ -456,8 +454,7 @@ def build_models(device: str,
         'Uformer + ROI feature [LIDnet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: ROIFeatureTrainer(
-                m, seg_aux, device=device, lr=1e-4, lambda_feat=1.0),
+            'trainer_fn': lambda m: make_arm('roifeature', m, device=device, lr=1e-4, segmentor=seg_aux),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'needs_seg_aux': True,
@@ -470,8 +467,7 @@ def build_models(device: str,
         'SwinIR + task feedback [LIDnet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: TaskFeedbackTrainer(
-                m, _fresh_aux(seg_aux), device=device, lr=1e-4, lambda_task=0.5),
+            'trainer_fn': lambda m: make_arm('taskfeedback', m, device=device, lr=1e-4, segmentor=_fresh_aux(seg_aux)),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'needs_seg_aux': True,
@@ -480,8 +476,7 @@ def build_models(device: str,
         'Uformer + task feedback [LIDnet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: TaskFeedbackTrainer(
-                m, _fresh_aux(seg_aux), device=device, lr=1e-4, lambda_task=0.5),
+            'trainer_fn': lambda m: make_arm('taskfeedback', m, device=device, lr=1e-4, segmentor=_fresh_aux(seg_aux)),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'needs_seg_aux': True,

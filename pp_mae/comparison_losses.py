@@ -534,3 +534,148 @@ def _self_test() -> None:
 
 if __name__ == '__main__':
     _self_test()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Matched-base design
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# The published comparison set a pure-L1 control against a treatment carrying
+# L1 + 0.5*SSIM + pathology + 0.5*cross-modal. Four things differ at once, so
+# that contrast cannot attribute anything to the pathology term.
+#
+# BaseObjective holds every NON-pathology term in the as-run treatment.
+# Competitors are then base + exactly one lesion-aware mechanism, so the
+# lesion-aware component is the only systematic difference between them.
+#
+#     L1Reference      base(ssim=0, xm=0)              conventional reference
+#     MatchedBase      base(ssim=0.5, xm=0.5)          the causal control
+#     +FlatROI         base + one normalised region
+#     +CurrentPL       base + nested ET/TC/WT          the treatment, unchanged
+#     +ROIFeature      base + feature-space region term
+#     +TaskFeedback    base + downstream task loss
+#
+# Set `xm_w=0.0` to reproduce the historical code state, where the cross-modal
+# term was identically zero because pooling to 1x1 made the cosine identically
+# one. Measured gradient share of that term in the current code is ~0.1%, so
+# the choice changes little -- but it should be stated, not assumed.
+
+class BaseObjective(nn.Module):
+    """Every non-pathology term present in the as-run treatment."""
+
+    def __init__(self, ssim_w: float = 0.5, xm_w: float = 0.5, channels: int = 4):
+        super().__init__()
+        self.ssim_w, self.xm_w = ssim_w, xm_w
+        self.ssim = None
+        self.xm = None
+        if ssim_w:
+            from losses import SSIMLoss
+            self.ssim = SSIMLoss(channel=channels)
+        if xm_w:
+            from losses import CrossModalConsistencyLoss
+            self.xm = CrossModalConsistencyLoss()
+
+    def forward(self, pred, target):
+        out = {'l1': F.l1_loss(pred, target)}
+        total = out['l1']
+        if self.ssim is not None:
+            out['ssim'] = self.ssim(pred, target)
+            total = total + self.ssim_w * out['ssim']
+        if self.xm is not None:
+            out['xm'] = self.xm(pred, target)
+            total = total + self.xm_w * out['xm']
+        out['base'] = total
+        return out
+
+    def describe(self) -> str:
+        parts = ['L1']
+        if self.ssim_w:
+            parts.append(f'{self.ssim_w}*SSIM')
+        if self.xm_w:
+            parts.append(f'{self.xm_w}*CrossModal')
+        return ' + '.join(parts)
+
+
+class CompositeTrainer(_BaseTrainer):
+    """base objective + at most one lesion-aware term.
+
+    Every arm in the benchmark is an instance of this class, so no arm can
+    differ from another in anything but the term under test.
+    """
+
+    def __init__(self, model, device='cpu', lr=1e-4,
+                 ssim_w=0.5, xm_w=0.5, channels=4,
+                 lesion=None, lesion_name='none', lambda_lesion=1.0):
+        super().__init__(model, device, lr)
+        self.base = BaseObjective(ssim_w, xm_w, channels).to(device)
+        self.lesion = lesion.to(device) if isinstance(lesion, nn.Module) else lesion
+        self.lesion_name = lesion_name
+        self.lambda_lesion = lambda_lesion
+
+    def step(self, batch: Dict) -> Dict[str, float]:
+        self.model.train()
+        noisy = batch['noisy'].to(self.device)
+        target = batch['target'].to(self.device)
+        seg = batch['seg'].to(self.device)
+
+        pred = self.model(noisy)
+        parts = self.base(pred, target)
+        total = parts['base']
+        l_les = None
+        if self.lesion is not None:
+            l_les = self.lesion(pred, target, seg)
+            total = total + self.lambda_lesion * l_les
+        self._backward(total)
+
+        out = {'total': total.item(), 'base': parts['base'].item(),
+               'l1': parts['l1'].item()}
+        if 'ssim' in parts:
+            out['ssim'] = parts['ssim'].item()
+        if 'xm' in parts:
+            out['xm'] = parts['xm'].item()
+        if l_les is not None:
+            out[self.lesion_name] = l_les.item()
+        return out
+
+
+def make_arm(kind: str, model, device='cpu', lr=1e-4, matched=True,
+             channels=4, segmentor=None, **kw):
+    """One constructor for every benchmark arm.
+
+    kind: 'l1' | 'base' | 'flatroi' | 'pathology' | 'pathology-disjoint'
+          | 'roifeature' | 'taskfeedback'
+    matched: True  -> base carries SSIM and cross-modal (the causal control)
+             False -> base is pure L1 (conventional reference)
+    """
+    ssim_w = 0.5 if matched else 0.0
+    xm_w = 0.5 if matched else 0.0
+
+    if kind == 'l1':
+        return CompositeTrainer(model, device, lr, 0.0, 0.0, channels)
+    if kind == 'base':
+        return CompositeTrainer(model, device, lr, ssim_w, xm_w, channels)
+    if kind == 'flatroi':
+        return CompositeTrainer(model, device, lr, ssim_w, xm_w, channels,
+                                lesion=FlatROIL1(lam=kw.get('lam', 1.0)),
+                                lesion_name='flatroi')
+    if kind in ('pathology', 'pathology-disjoint'):
+        mode = 'disjoint' if kind.endswith('disjoint') else 'nested'
+        return CompositeTrainer(model, device, lr, ssim_w, xm_w, channels,
+                                lesion=RegionWeightedL1(mode=mode),
+                                lesion_name='pathology')
+    if kind == 'roifeature':
+        if segmentor is None:
+            raise ValueError('roifeature needs a segmentor')
+        return CompositeTrainer(model, device, lr, ssim_w, xm_w, channels,
+                                lesion=ROIFeatureLoss(segmentor),
+                                lesion_name='roifeat',
+                                lambda_lesion=kw.get('lambda_feat', 1.0))
+    if kind == 'taskfeedback':
+        if segmentor is None:
+            raise ValueError('taskfeedback needs a segmentor')
+        t = TaskFeedbackTrainer(model, segmentor, device, lr,
+                                lambda_task=kw.get('lambda_task', 0.5),
+                                seg_every=kw.get('seg_every', 0))
+        t.base = BaseObjective(ssim_w, xm_w, channels).to(device)
+        return t
+    raise ValueError(f'unknown arm kind {kind!r}')

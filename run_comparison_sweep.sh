@@ -55,11 +55,11 @@ PHASE="${PHASE:-1}"
 # compute on competitors, then add competitors in order of how much they
 # threaten the novelty claim.
 case "$PHASE" in
-  0)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR+SSIM,Uformer+SSIM,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task,SwinIR+PLdisj,Uformer+PLdisj}"
+  0)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR-Base,Uformer-Base,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task,SwinIR+PLdisj,Uformer+PLdisj}"
        : "${EPOCHS:=2}" ; : "${SEG_EPOCHS:=2}" ; : "${MAX_SUBJ:=5}" ; : "${SEEDS:=1}" ;;
   1)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur}"
        : "${EPOCHS:=100}" ;;
-  2)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR+SSIM,Uformer+SSIM,SwinIR+FlatROI,Uformer+FlatROI}" ;;
+  2)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR-Base,Uformer-Base,SwinIR+FlatROI,Uformer+FlatROI}" ;;
   3)   MODELS="${MODELS:-Noisy,Clean,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task}" ;;
   4)   MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+PLdisj,Uformer+PLdisj}" ;;
   *)   echo "PHASE must be 0 (smoke), 1 (convergence), 2 (core competitors),"

@@ -79,8 +79,8 @@ METHOD_MAP = {
     # contrasted with analyze_multiseed.py --baseline/--treatment.
     'SwinIR + PathologyLoss (current, nested)':  ('SwinIR',  'PathologyLoss'),
     'Uformer + PathologyLoss (current, nested)': ('Uformer', 'PathologyLoss'),
-    'SwinIR + SSIM':                             ('SwinIR',  'L1+SSIM'),
-    'Uformer + SSIM':                            ('Uformer', 'L1+SSIM'),
+    'SwinIR + matched base (no pathology) [CONTROL]':  ('SwinIR',  'MatchedBase'),
+    'Uformer + matched base (no pathology) [CONTROL]': ('Uformer', 'MatchedBase'),
     'SwinIR + FlatROI [ROIRecNet-inspired]':     ('SwinIR',  'FlatROI'),
     'Uformer + FlatROI [ROIRecNet-inspired]':    ('Uformer', 'FlatROI'),
     'SwinIR + ROI feature [LIDnet-inspired]':    ('SwinIR',  'ROIFeature'),
