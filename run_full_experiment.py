@@ -80,6 +80,8 @@ from option_baselines import (
     UformerLite, UformerTrainer, UformerPathologyTrainer,
 )
 from segmentor import UNetSegmentor, SegTrainer
+from comparison_losses import (PathologyLossCleanTrainer, BinaryROITrainer,
+                               ROIFeatureTrainer, TaskFeedbackTrainer)
 from brats_loader import BraTSDataset
 from evaluation import psnr, ssim_numpy, nrmse
 
@@ -225,7 +227,46 @@ def nanmean(xs: List[float]) -> float:
 #  Model registry — config kept beside the constructor so it can be saved
 # ═══════════════════════════════════════════════════════════════════════════
 
-def build_models(device: str) -> Dict[str, dict]:
+class _Identity(nn.Module):
+    """Placeholder for the reference arms, which train nothing."""
+    def __init__(self):
+        super().__init__()
+        self._p = nn.Parameter(torch.zeros(1), requires_grad=False)
+
+    def forward(self, x):
+        return x
+
+
+class _NullTrainer:
+    """Satisfies the trainer interface without performing any optimisation."""
+    def __init__(self, model):
+        self.model = model
+
+    def step(self, batch):
+        return {'total': 0.0}
+
+    def predict(self, noisy):
+        return noisy
+
+
+def _fresh_aux(template):
+    """A newly initialised auxiliary segmentor of the same shape.
+
+    The task-feedback arms train their own segmentor from scratch, so each one
+    gets its own copy rather than sharing (and silently co-training) a single
+    instance across arms.
+    """
+    import copy
+    m = copy.deepcopy(template)
+    for layer in m.modules():
+        if hasattr(layer, 'reset_parameters'):
+            layer.reset_parameters()
+    return m
+
+
+def build_models(device: str,
+                 seg_eval: 'UNetSegmentor' = None,
+                 seg_aux:  'UNetSegmentor' = None) -> Dict[str, dict]:
     """Round 4 exactly as specified in proposal section 6.5."""
     return {
         'PP-MAE-v2 (mask-free) [PROPOSED]': {
@@ -276,6 +317,126 @@ def build_models(device: str) -> Dict[str, dict]:
             'uses_mask_at_inference': True,      # <-- the known confound
             'short': 'PP-MAE-v1',
         },
+        # ── reference arms: no training, inference only ────────────────
+        # Without these two numbers every Dice figure in the paper is
+        # unanchored. The floor says whether restoration helps segmentation at
+        # all; the ceiling says how much of the achievable gap any method
+        # closes. Both reuse the frozen evaluation segmentor.
+        'Noisy input (no restoration) [FLOOR]': {
+            'class':  _Identity,
+            'config': {},
+            'trainer_fn': lambda m: _NullTrainer(m),
+            'infer_fn':   lambda m, noisy, seg: noisy,
+            'uses_mask_at_inference': False,
+            'no_train': True,
+            'short': 'Noisy',
+        },
+        'Clean image (oracle) [CEILING]': {
+            'class':  _Identity,
+            'config': {},
+            'trainer_fn': lambda m: _NullTrainer(m),
+            'infer_fn':   lambda m, noisy, seg, target=None: target,
+            'needs_target': True,
+            'uses_mask_at_inference': False,
+            'no_train': True,
+            'short': 'Clean',
+        },
+
+        # ── PathologyLoss exactly as Equation (3) states it ────────────────
+        # No SSIM term, no cross-modal term, fixed numeric weights, disjoint
+        # masks so the stated 3:2:1 is the applied 3:2:1. Quote THIS arm for
+        # every PathologyLoss number in the manuscript.
+        'SwinIR + PathologyLoss (Eq.3)': {
+            'class':  SwinIRLite,
+            'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
+            'trainer_fn': lambda m: PathologyLossCleanTrainer(
+                m, device=device, lr=1e-4, mode='disjoint'),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'SwinIR+PL3',
+        },
+        'Uformer + PathologyLoss (Eq.3)': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: PathologyLossCleanTrainer(
+                m, device=device, lr=1e-4, mode='disjoint'),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+PL3',
+        },
+
+        # ── Binary ROI weighting — Sun et al. 2019 (ROIRecNet) principle ───
+        # THE DECISIVE CONTROL. One binary lesion mask, flat weight, no
+        # per-region normalisation, no sub-region hierarchy. If this matches
+        # the arms above, nesting and clinical priorities contribute nothing
+        # and the novelty claim does not survive.
+        'SwinIR + binary ROI [ROIRecNet-style]': {
+            'class':  SwinIRLite,
+            'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
+            'trainer_fn': lambda m: BinaryROITrainer(m, device=device, lr=1e-4, k=2.0),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'SwinIR+ROI',
+        },
+        'Uformer + binary ROI [ROIRecNet-style]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: BinaryROITrainer(m, device=device, lr=1e-4, k=2.0),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+ROI',
+        },
+
+        # ── ROI perceptual loss — Chen et al. 2021 (LIDnet) principle ──────
+        # Feature-space region weighting instead of pixel-space. Features come
+        # from seg_aux, NOT from the evaluation segmentor — see the note in
+        # main() for why that distinction decides whether the comparison means
+        # anything.
+        'SwinIR + ROI feature [LIDnet-style]': {
+            'class':  SwinIRLite,
+            'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
+            'trainer_fn': lambda m: ROIFeatureTrainer(
+                m, seg_aux, device=device, lr=1e-4, lambda_feat=1.0),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'needs_seg_aux': True,
+            'short': 'SwinIR+ROIfeat',
+        },
+        'Uformer + ROI feature [LIDnet-style]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: ROIFeatureTrainer(
+                m, seg_aux, device=device, lr=1e-4, lambda_feat=1.0),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'needs_seg_aux': True,
+            'short': 'Uformer+ROIfeat',
+        },
+
+        # ── Task feedback — LIDnet's central idea ──────────────────────────
+        # Put the downstream loss in the objective rather than a prior about
+        # where the downstream task looks. Trains its own copy of seg_aux.
+        'SwinIR + task feedback [LIDnet-style]': {
+            'class':  SwinIRLite,
+            'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
+            'trainer_fn': lambda m: TaskFeedbackTrainer(
+                m, _fresh_aux(seg_aux), device=device, lr=1e-4, lambda_task=0.5),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'needs_seg_aux': True,
+            'short': 'SwinIR+task',
+        },
+        'Uformer + task feedback [LIDnet-style]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: TaskFeedbackTrainer(
+                m, _fresh_aux(seg_aux), device=device, lr=1e-4, lambda_task=0.5),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'needs_seg_aux': True,
+            'short': 'Uformer+task',
+        },
+
         'SwinIR-lite (L1)': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
@@ -402,7 +563,10 @@ def evaluate_and_dump(model, spec, val_loader, seg_model, device,
         target  = b['target']
         subs    = b.get('subject', ['?'] * noisy.shape[0])
 
-        pred = spec['infer_fn'](model, noisy, seg)
+        if spec.get('needs_target'):
+            pred = spec['infer_fn'](model, noisy, seg, target.to(device))
+        else:
+            pred = spec['infer_fn'](model, noisy, seg)
         if isinstance(pred, dict):
             pred = pred.get('denoised', list(pred.values())[0])
         pred_cpu = pred.detach().cpu()
@@ -1077,7 +1241,33 @@ def main():
     print("Segmentor frozen.\n", flush=True)
 
     # ── Train every model ─────────────────────────────────────────────────
-    specs, results, histories, all_slices = build_models(device), [], {}, []
+    # ── second segmentor: the reason the comparison is honest ───────────
+    # seg_model scores every arm and is frozen. seg_aux supplies features to
+    # the ROI-feature arms and seeds the task-feedback arms.
+    #
+    # They must be different networks. If a restorer were optimised against
+    # the same network that scores it, the score would measure how well those
+    # two co-adapted, not how well the restored images support segmentation —
+    # the LIDnet-style arms would win by construction and the comparison would
+    # be worthless. LIDnet handles this the same way: its reported AP comes
+    # from a detector pre-trained on normal-dose CT and held fixed (Sec. 4.1).
+    #
+    # seg_aux sees the same clean training images but is initialised
+    # independently, so it is a genuinely separate judge.
+    seg_aux = UNetSegmentor(in_channels=4, n_classes=4, base_ch=32).to(device)
+    _aux_tr = SegTrainer(seg_aux, device=device, lr=5e-4)
+    print('\n=== AUXILIARY SEGMENTOR (for LIDnet-style arms) ===', flush=True)
+    for ep in range(1, args.seg_epochs + 1):
+        tot = 0.0
+        for b in train_loader:
+            tot += _aux_tr.step(b['target'], b['seg'][:, 0].long())
+        if ep % max(args.seg_epochs // 2, 1) == 0 or ep == 1:
+            print(f'  [aux] Ep {ep:2d}/{args.seg_epochs}  '
+                  f'loss={tot/max(len(train_loader),1):.4f}', flush=True)
+    print('  Auxiliary segmentor is separate from the evaluation segmentor.\n',
+          flush=True)
+
+    specs, results, histories, all_slices = build_models(device, seg_model, seg_aux), [], {}, []
 
     if args.models:
         keep = {m.strip() for m in args.models.split(',') if m.strip()}
@@ -1094,7 +1284,11 @@ def main():
         print(f"\n{'='*64}\n  {name}\n{'='*64}", flush=True)
         t0 = time.time()
         model = spec['class'](**spec['config'])
-        model, hist, dev = train_model(model, spec, train_loader, args, device, name)
+        if spec.get('no_train'):
+            model, hist, dev = model.to(device), [], device
+            print('    reference arm — no training', flush=True)
+        else:
+            model, hist, dev = train_model(model, spec, train_loader, args, device, name)
         histories[name] = hist
 
         tag = spec['short'].replace(' ', '_').replace('+', 'plus')

@@ -69,6 +69,22 @@ METHOD_MAP = {
     'PP-MAE-v2 (CMA only, no SAR)':     ('PP-MAE',  'v2-CMA'),
     'PP-MAE-v2 (SAR only, no CMA)':     ('PP-MAE',  'v2-SAR'),
     'PP-MAE-v2 (neither module)':       ('PP-MAE',  'v2-none'),
+
+    # Reference arms. `backbone` is 'Reference' because neither is a model:
+    # they are the floor and ceiling every other arm is measured between.
+    'Noisy input (no restoration) [FLOOR]':  ('Reference', 'noisy'),
+    'Clean image (oracle) [CEILING]':        ('Reference', 'clean'),
+
+    # Benchmark arms. `loss` names the objective under test, so any two can be
+    # contrasted with analyze_multiseed.py --baseline/--treatment.
+    'SwinIR + PathologyLoss (Eq.3)':          ('SwinIR',  'PathologyLoss-Eq3'),
+    'Uformer + PathologyLoss (Eq.3)':         ('Uformer', 'PathologyLoss-Eq3'),
+    'SwinIR + binary ROI [ROIRecNet-style]':  ('SwinIR',  'BinaryROI'),
+    'Uformer + binary ROI [ROIRecNet-style]': ('Uformer', 'BinaryROI'),
+    'SwinIR + ROI feature [LIDnet-style]':    ('SwinIR',  'ROIFeature'),
+    'Uformer + ROI feature [LIDnet-style]':   ('Uformer', 'ROIFeature'),
+    'SwinIR + task feedback [LIDnet-style]':  ('SwinIR',  'TaskFeedback'),
+    'Uformer + task feedback [LIDnet-style]': ('Uformer', 'TaskFeedback'),
 }
 
 

@@ -65,6 +65,10 @@ from scipy import stats
 
 BASELINE = 'L1'
 TREATMENT = 'PathologyLoss'
+# Both are overridden by --baseline / --treatment so any two arms can be
+# contrasted: PathologyLoss-Eq3 vs BinaryROI is the comparison that decides
+# whether nested multi-region weighting earns its complexity over the flat
+# binary weighting published in 2019.
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -87,6 +91,13 @@ def parse_args():
                    help="'loss' (default): PathologyLoss vs L1 within each "
                         "backbone.  'backbone': the PathologyLoss gain on "
                         "SwinIR vs on Uformer, i.e. does the benefit transfer?")
+    p.add_argument('--baseline', default=None,
+                   help="Arm to treat as the control, matched against the "
+                        "'loss' column of the tidy CSV (default: L1).")
+    p.add_argument('--treatment', default=None,
+                   help="Arm to treat as the intervention (default: "
+                        "PathologyLoss). Example: --baseline BinaryROI "
+                        "--treatment PathologyLoss-Eq3")
     p.add_argument('--alpha', type=float, default=0.05,
                    help='Significance level for both NHST and TOST (0.05)')
     p.add_argument('--n_boot', type=int, default=10000,
@@ -370,6 +381,12 @@ def main():
     args = parse_args()
     if args.margin <= 0:
         sys.exit('--margin must be positive.')
+
+    global BASELINE, TREATMENT
+    if args.baseline:
+        BASELINE = args.baseline
+    if args.treatment:
+        TREATMENT = args.treatment
 
     lines: list[str] = []
     def out(s=''):
