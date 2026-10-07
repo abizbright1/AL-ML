@@ -77,14 +77,18 @@ METHOD_MAP = {
 
     # Benchmark arms. `loss` names the objective under test, so any two can be
     # contrasted with analyze_multiseed.py --baseline/--treatment.
-    'SwinIR + PathologyLoss (Eq.3)':          ('SwinIR',  'PathologyLoss-Eq3'),
-    'Uformer + PathologyLoss (Eq.3)':         ('Uformer', 'PathologyLoss-Eq3'),
-    'SwinIR + binary ROI [ROIRecNet-style]':  ('SwinIR',  'BinaryROI'),
-    'Uformer + binary ROI [ROIRecNet-style]': ('Uformer', 'BinaryROI'),
-    'SwinIR + ROI feature [LIDnet-style]':    ('SwinIR',  'ROIFeature'),
-    'Uformer + ROI feature [LIDnet-style]':   ('Uformer', 'ROIFeature'),
-    'SwinIR + task feedback [LIDnet-style]':  ('SwinIR',  'TaskFeedback'),
-    'Uformer + task feedback [LIDnet-style]': ('Uformer', 'TaskFeedback'),
+    'SwinIR + PathologyLoss (current, nested)':  ('SwinIR',  'PathologyLoss'),
+    'Uformer + PathologyLoss (current, nested)': ('Uformer', 'PathologyLoss'),
+    'SwinIR + SSIM':                             ('SwinIR',  'L1+SSIM'),
+    'Uformer + SSIM':                            ('Uformer', 'L1+SSIM'),
+    'SwinIR + FlatROI [ROIRecNet-inspired]':     ('SwinIR',  'FlatROI'),
+    'Uformer + FlatROI [ROIRecNet-inspired]':    ('Uformer', 'FlatROI'),
+    'SwinIR + ROI feature [LIDnet-inspired]':    ('SwinIR',  'ROIFeature'),
+    'Uformer + ROI feature [LIDnet-inspired]':   ('Uformer', 'ROIFeature'),
+    'SwinIR + task feedback [LIDnet-inspired]':  ('SwinIR',  'TaskFeedback'),
+    'Uformer + task feedback [LIDnet-inspired]': ('Uformer', 'TaskFeedback'),
+    'SwinIR + PathologyLoss (disjoint) [ABLATION]':  ('SwinIR',  'PL-Disjoint'),
+    'Uformer + PathologyLoss (disjoint) [ABLATION]': ('Uformer', 'PL-Disjoint'),
 }
 
 

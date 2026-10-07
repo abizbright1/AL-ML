@@ -80,7 +80,8 @@ from option_baselines import (
     UformerLite, UformerTrainer, UformerPathologyTrainer,
 )
 from segmentor import UNetSegmentor, SegTrainer
-from comparison_losses import (PathologyLossCleanTrainer, BinaryROITrainer,
+from comparison_losses import (CurrentPathologyLossTrainer, FlatROITrainer,
+                               L1SSIMTrainer,
                                ROIFeatureTrainer, TaskFeedbackTrainer)
 from brats_loader import BraTSDataset
 from evaluation import psnr, ssim_numpy, nrmse
@@ -99,6 +100,11 @@ def parse_args():
     p.add_argument('--epochs',       type=int,   default=100)
     p.add_argument('--seg_epochs',   type=int,   default=20)
     p.add_argument('--max_subjects', type=int,   default=100)
+    p.add_argument('--split_seed', type=int, default=None,
+                   help='Seed for the subject split ONLY. Fix this and vary '
+                        '--seed to isolate training variability from cohort '
+                        'composition; the two are confounded when --seed '
+                        'drives both. Defaults to --seed (original behaviour).')
     p.add_argument('--patch_size',   type=int,   default=96)
     p.add_argument('--sigma',        type=float, default=0.08)
     p.add_argument('--batch_size',   type=int,   default=4)
@@ -346,23 +352,68 @@ def build_models(device: str,
         # No SSIM term, no cross-modal term, fixed numeric weights, disjoint
         # masks so the stated 3:2:1 is the applied 3:2:1. Quote THIS arm for
         # every PathologyLoss number in the manuscript.
-        'SwinIR + PathologyLoss (Eq.3)': {
+        'SwinIR + PathologyLoss (current, nested)': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: PathologyLossCleanTrainer(
-                m, device=device, lr=1e-4, mode='disjoint'),
+            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
+                m, device=device, lr=1e-4, mode='nested'),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'SwinIR+PL3',
+            'short': 'SwinIR+PLcur',
         },
-        'Uformer + PathologyLoss (Eq.3)': {
+        'Uformer + PathologyLoss (current, nested)': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: PathologyLossCleanTrainer(
+            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
+                m, device=device, lr=1e-4, mode='nested'),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+PLcur',
+        },
+
+        # ── Conventional structure-aware competitor ───────────────────────
+        # Answers the question asked before any lesion argument: does
+        # PathologyLoss beat simply using a stronger standard objective? It
+        # matters doubly because the ORIGINAL +PathologyLoss trainers already
+        # carry an SSIM term at 0.5 while their L1 controls do not.
+        'SwinIR + SSIM': {
+            'class':  SwinIRLite,
+            'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
+            'trainer_fn': lambda m: L1SSIMTrainer(m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'SwinIR+SSIM',
+        },
+        'Uformer + SSIM': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: L1SSIMTrainer(m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+SSIM',
+        },
+
+        # ── ABLATION ONLY — not a correction to the primary method ────────
+        # Disjoint ET/NCR/ED masks make the stated 3:2:1 the applied 3:2:1.
+        # This asks whether the nested BraTS hierarchy contributes anything;
+        # it is a separate question and must never replace the arm above.
+        'SwinIR + PathologyLoss (disjoint) [ABLATION]': {
+            'class':  SwinIRLite,
+            'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
+            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
                 m, device=device, lr=1e-4, mode='disjoint'),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'Uformer+PL3',
+            'short': 'SwinIR+PLdisj',
+        },
+        'Uformer + PathologyLoss (disjoint) [ABLATION]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
+                m, device=device, lr=1e-4, mode='disjoint'),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+PLdisj',
         },
 
         # ── Binary ROI weighting — Sun et al. 2019 (ROIRecNet) principle ───
@@ -370,21 +421,21 @@ def build_models(device: str,
         # per-region normalisation, no sub-region hierarchy. If this matches
         # the arms above, nesting and clinical priorities contribute nothing
         # and the novelty claim does not survive.
-        'SwinIR + binary ROI [ROIRecNet-style]': {
+        'SwinIR + FlatROI [ROIRecNet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: BinaryROITrainer(m, device=device, lr=1e-4, k=2.0),
+            'trainer_fn': lambda m: FlatROITrainer(m, device=device, lr=1e-4, k=2.0),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'SwinIR+ROI',
+            'short': 'SwinIR+FlatROI',
         },
-        'Uformer + binary ROI [ROIRecNet-style]': {
+        'Uformer + FlatROI [ROIRecNet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: BinaryROITrainer(m, device=device, lr=1e-4, k=2.0),
+            'trainer_fn': lambda m: FlatROITrainer(m, device=device, lr=1e-4, k=2.0),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'Uformer+ROI',
+            'short': 'Uformer+FlatROI',
         },
 
         # ── ROI perceptual loss — Chen et al. 2021 (LIDnet) principle ──────
@@ -392,7 +443,7 @@ def build_models(device: str,
         # from seg_aux, NOT from the evaluation segmentor — see the note in
         # main() for why that distinction decides whether the comparison means
         # anything.
-        'SwinIR + ROI feature [LIDnet-style]': {
+        'SwinIR + ROI feature [LIDnet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
             'trainer_fn': lambda m: ROIFeatureTrainer(
@@ -402,7 +453,7 @@ def build_models(device: str,
             'needs_seg_aux': True,
             'short': 'SwinIR+ROIfeat',
         },
-        'Uformer + ROI feature [LIDnet-style]': {
+        'Uformer + ROI feature [LIDnet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
             'trainer_fn': lambda m: ROIFeatureTrainer(
@@ -416,7 +467,7 @@ def build_models(device: str,
         # ── Task feedback — LIDnet's central idea ──────────────────────────
         # Put the downstream loss in the objective rather than a prior about
         # where the downstream task looks. Trains its own copy of seg_aux.
-        'SwinIR + task feedback [LIDnet-style]': {
+        'SwinIR + task feedback [LIDnet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
             'trainer_fn': lambda m: TaskFeedbackTrainer(
@@ -426,7 +477,7 @@ def build_models(device: str,
             'needs_seg_aux': True,
             'short': 'SwinIR+task',
         },
-        'Uformer + task feedback [LIDnet-style]': {
+        'Uformer + task feedback [LIDnet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
             'trainer_fn': lambda m: TaskFeedbackTrainer(
@@ -1199,7 +1250,8 @@ def main():
     import random as _random
     _subj_of = [os.path.basename(ds.index[i][0]) for i in range(len(ds))]
     _subjects = sorted(set(_subj_of))
-    _rng = _random.Random(args.seed)
+    _split_seed = args.seed if args.split_seed is None else args.split_seed
+    _rng = _random.Random(_split_seed)
     _rng.shuffle(_subjects)
     _n_val = max(1, int(round(0.2 * len(_subjects))))
     _val_subj, _train_subj = set(_subjects[:_n_val]), set(_subjects[_n_val:])
@@ -1209,7 +1261,8 @@ def main():
     _va_idx = [i for i, sj in enumerate(_subj_of) if sj in _val_subj]
     train_ds = torch.utils.data.Subset(ds, _tr_idx)
     val_ds   = torch.utils.data.Subset(ds, _va_idx)
-    print(f"  SUBJECTS  train {len(_train_subj)} | val {len(_val_subj)} | overlap 0")
+    print(f"  SUBJECTS  train {len(_train_subj)} | val {len(_val_subj)} | overlap 0"
+          f"   (split seed {_split_seed}{'  = run seed' if args.split_seed is None else '  FIXED, independent of run seed'})")
     train_loader = torch.utils.data.DataLoader(
         train_ds, args.batch_size, shuffle=True,
         generator=_loader_gen, worker_init_fn=_worker_init)

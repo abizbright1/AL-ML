@@ -61,14 +61,22 @@ import torch.nn.functional as F
 # BraTS labels on disk after the 4 -> 3 remap: 0=BG, 1=NCR, 2=ED, 3=ET.
 # The three clinical regions are NESTED:  ET subset of TC subset of WT.
 #
-# That nesting has a consequence Equation (3) does not state. Summing three
-# terms over nested masks with weights (1, 2, 3) gives every ET pixel a weight
-# of 1+2+3 = 6, every NCR pixel 1+2 = 3, and every oedema pixel 1 -- an
-# effective ratio of 6:3:1, not the 3:2:1 the manuscript claims.
+# Nesting has a consequence Equation (3) does not state, and it is NOT the
+# naive one. Because every term carries its own 1/|M_r|, the coefficient on a
+# single voxel x is
 #
-# `disjoint` partitions the tumour so the stated weights are the applied
-# weights. `nested` reproduces the original behaviour. Report whichever you
-# run, and say which in the paper.
+#     sum_r  w_r * M_r(x) / |M_r|
+#
+# so an ET voxel contributes  1/|WT| + 2/|TC| + 3/|ET| , a TC-but-not-ET voxel
+# 1/|WT| + 2/|TC| , and oedema 1/|WT| . The effective emphasis therefore
+# depends on the three region SIZES and varies slice by slice -- it is not a
+# fixed 6:3:1 ratio. The manuscript should state this; the implementation
+# should not change because of it.
+#
+# `nested` is the method that produced the published results and is the
+# default for the primary arm. `disjoint` exists only for the PL-Disjoint
+# ablation, which asks a different question and must never be presented as a
+# correction to the primary method.
 
 def region_masks(seg_map: torch.Tensor, mode: str = 'disjoint') -> Dict[str, torch.Tensor]:
     """seg_map: (B, 1, H, W) integer labels -> dict of float masks."""
@@ -132,24 +140,38 @@ class RegionWeightedL1(nn.Module):
         return total
 
 
-class BinaryROIL1(nn.Module):
-    """ROIRecNet-style: one binary mask, flat extra weight, no normalisation.
+class FlatROIL1(nn.Module):
+    """One binary lesion mask, one normalised term. ROIRecNet-INSPIRED.
 
-    L = mean |X^ - X| over the image, with error inside the lesion counted
-    (1 + k) times instead of once. This is the simplest thing that "weight the
-    tumour more" can mean, and it is the baseline PathologyLoss has to beat to
-    justify nesting, per-region normalisation and clinical priorities.
+        L_flat = lambda * ||M_WT (X^ - X)||_1 / |M_WT|
+
+    Deliberately mirrors the STRUCTURE of RegionWeightedL1 with the region
+    count reduced from three to one, so the contrast between this arm and the
+    primary arm isolates exactly one thing: whether splitting the tumour into
+    nested sub-regions with separate normalisation and separate clinical
+    priorities buys anything over "weight the tumour".
+
+    If the two arms match, the benefit comes from ROI-aware restoration
+    itself, which Sun et al. established in 2019.
+
+    NOT a reproduction of ROIRecNet. Sun et al. derive the ROI from a
+    segmentation network and fine-tune with a binary weighted L2; this arm
+    uses the ground-truth mask, an L1 penalty, and no fine-tuning stage. Label
+    it "ROIRecNet-inspired" in the paper, never "ROIRecNet".
     """
 
-    def __init__(self, k: float = 2.0):
+    def __init__(self, lam: float = 1.0):
         super().__init__()
-        self.k = k
+        self.lam = lam
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor,
                 seg_map: torch.Tensor) -> torch.Tensor:
         err = (pred - target).abs()
-        w = 1.0 + self.k * whole_tumour_mask(seg_map)
-        return (err * w).sum() / (w.sum() * pred.shape[1])
+        mask = whole_tumour_mask(seg_map)
+        n = mask.sum()
+        if n.item() == 0:
+            return torch.zeros((), device=pred.device, dtype=pred.dtype)
+        return self.lam * (err * mask).sum() / (n * pred.shape[1])
 
 
 class ROIFeatureLoss(nn.Module):
@@ -240,19 +262,31 @@ class _BaseTrainer:
         return self.model(noisy.to(self.device)).cpu()
 
 
-class PathologyLossCleanTrainer(_BaseTrainer):
-    """ARM: PathologyLoss as Equation (3) states it.
+class CurrentPathologyLossTrainer(_BaseTrainer):
+    """PRIMARY ARM: PathologyLoss with the NESTED ET/TC/WT masks.
 
-    L_total = L1(global) + L_path
+        L_total = L1(global) + L_path
 
-    Nothing else. In particular no SSIM term in the global loss, no
-    cross-modal consistency term, and fixed numeric weights rather than
-    weights emitted by a network. Use this arm for every PathologyLoss number
-    the manuscript reports, so the equation and the experiment agree.
+    with w_WT = 1, w_TC = 2, w_ET = 3 and each region normalised by its own
+    size, over the nested BraTS regions ET subset TC subset WT.
+
+    This is the method under test. It is NOT redesigned here: the benchmark
+    exists to compare other objectives against the published method, so the
+    masks stay nested and the weights stay as they are. A disjoint variant is
+    available as the separately named PL-Disjoint ablation, which answers a
+    different question and must never be presented as a correction.
+
+    One caveat the regression test will surface: the original trainers wrap
+    this term in PPMAELoss, which also carries an SSIM term in its global loss
+    and a cross-modal consistency term, and emits w_r from an untrained
+    network rather than as constants. This class implements Equation (3) as
+    the manuscript writes it. The two therefore will NOT agree numerically --
+    see verify_pathologyloss.py, which quantifies the gap so you can decide
+    which object the paper benchmarks.
     """
 
     def __init__(self, model, device='cpu', lr=1e-4,
-                 mode='disjoint', weights=None, lambda_path=1.0):
+                 mode='nested', weights=None, lambda_path=1.0):
         super().__init__(model, device, lr)
         self.path = RegionWeightedL1(mode=mode, weights=weights)
         self.lambda_path = lambda_path
@@ -273,17 +307,24 @@ class PathologyLossCleanTrainer(_BaseTrainer):
                 'path': l_path.item()}
 
 
-class BinaryROITrainer(_BaseTrainer):
-    """ARM: binary ROI weighting (ROIRecNet principle).
+class FlatROITrainer(_BaseTrainer):
+    """PRIMARY COMPETITOR: one lesion region instead of three.
 
-    One lesion mask, flat weight, no normalisation, no hierarchy. If this
-    performs as well as PathologyLossCleanTrainer, the paper's contribution
-    reduces to "weight the tumour", which was published in 2019.
+        L_total = L1 + lambda * ||M_WT (X^ - X)||_1 / |M_WT|
+
+    Same structure as the primary arm with the region count reduced to one.
+    THE DECISIVE CONTRAST. If this matches CurrentPathologyLossTrainer, the
+    nested hierarchy, the separate per-region normalisation and the 1:2:3
+    priorities contribute nothing measurable, and the remaining novelty is
+    ROI-aware restoration itself -- published by Sun et al. in 2019.
+
+    ROIRecNet-inspired, not a reproduction. Do not name Sun et al. as the
+    arm's identity in the paper.
     """
 
-    def __init__(self, model, device='cpu', lr=1e-4, k=2.0):
+    def __init__(self, model, device='cpu', lr=1e-4, lam=1.0):
         super().__init__(model, device, lr)
-        self.loss_fn = BinaryROIL1(k=k)
+        self.roi = FlatROIL1(lam=lam)
 
     def step(self, batch: Dict) -> Dict[str, float]:
         self.model.train()
@@ -292,9 +333,46 @@ class BinaryROITrainer(_BaseTrainer):
         seg = batch['seg'].to(self.device)
 
         pred = self.model(noisy)
-        total = self.loss_fn(pred, target, seg)
+        l_global = F.l1_loss(pred, target)
+        l_roi = self.roi(pred, target, seg)
+        total = l_global + l_roi
         self._backward(total)
-        return {'total': total.item()}
+        return {'total': total.item(),
+                'global': l_global.item(), 'roi': l_roi.item()}
+
+
+class L1SSIMTrainer(_BaseTrainer):
+    """CONVENTIONAL COMPETITOR: structure-aware reconstruction, no lesion prior.
+
+        L_total = L1 + lambda_ssim * SSIMLoss
+
+    Answers the question a reviewer asks before any lesion argument: does
+    PathologyLoss beat simply using a stronger, standard structural objective?
+
+    It matters doubly here. The ORIGINAL +PathologyLoss trainers already carry
+    an SSIM term at weight 0.5 inside PPMAELoss while their L1 controls do not,
+    so part of the published effect may be this term rather than the region
+    weighting. This arm measures that part directly.
+    """
+
+    def __init__(self, model, device='cpu', lr=1e-4, lambda_ssim=0.5, channels=4):
+        super().__init__(model, device, lr)
+        from losses import SSIMLoss
+        self.ssim = SSIMLoss(channel=channels).to(device)
+        self.lambda_ssim = lambda_ssim
+
+    def step(self, batch: Dict) -> Dict[str, float]:
+        self.model.train()
+        noisy = batch['noisy'].to(self.device)
+        target = batch['target'].to(self.device)
+
+        pred = self.model(noisy)
+        l_global = F.l1_loss(pred, target)
+        l_ssim = self.ssim(pred, target)
+        total = l_global + self.lambda_ssim * l_ssim
+        self._backward(total)
+        return {'total': total.item(),
+                'global': l_global.item(), 'ssim': l_ssim.item()}
 
 
 class ROIFeatureTrainer(_BaseTrainer):
@@ -347,12 +425,18 @@ class TaskFeedbackTrainer(_BaseTrainer):
     way: its reported AP comes from a detector pre-trained on normal-dose CT
     and held fixed (Section 4.1).
 
-    Training alternates in LIDnet's style: the restorer updates every step, the
-    auxiliary segmentor every `seg_every` steps on detached restored images.
+    FROZEN BY DEFAULT (`seg_every=0`). A co-trained auxiliary network changes
+    the restorer and the network generating its loss at the same time, which
+    makes the result hard to attribute. Frozen, the arm asks one clean
+    question: if the restorer is optimised directly for a fixed segmentation
+    objective, does that beat optimising for a mask prior?
+
+    Set `seg_every=4` for the alternating, LIDnet-style co-training variant,
+    and report it as a separate arm rather than as this one.
     """
 
     def __init__(self, model, aux_segmentor, device='cpu', lr=1e-4,
-                 lambda_task=0.5, seg_lr=5e-4, seg_every=4, n_classes=4):
+                 lambda_task=0.5, seg_lr=5e-4, seg_every=0, n_classes=4):
         super().__init__(model, device, lr)
         self.aux = aux_segmentor.to(device)
         self.aux_optim = torch.optim.Adam(self.aux.parameters(), lr=seg_lr)
@@ -381,7 +465,7 @@ class TaskFeedbackTrainer(_BaseTrainer):
         # ---- auxiliary segmentor update on detached restorations ----------
         self._i += 1
         l_aux = float('nan')
-        if self._i % self.seg_every == 0:
+        if self.seg_every and self._i % self.seg_every == 0:
             for p in self.aux.parameters():
                 p.requires_grad_(True)
             self.aux.train()
@@ -420,9 +504,9 @@ def _self_test() -> None:
     assert (n['ET'] * n['TC']).sum() > 0, 'nested masks are expected to overlap'
     print('masks           ok   (disjoint are exclusive, nested overlap)')
 
-    for name, fn in [('RegionWeightedL1 disjoint', RegionWeightedL1('disjoint')),
-                     ('RegionWeightedL1 nested',   RegionWeightedL1('nested')),
-                     ('BinaryROIL1',               BinaryROIL1(k=2.0))]:
+    for name, fn in [('RegionWeightedL1 nested',   RegionWeightedL1('nested')),
+                     ('RegionWeightedL1 disjoint', RegionWeightedL1('disjoint')),
+                     ('FlatROIL1',                 FlatROIL1(lam=1.0))]:
         v = fn(pred, target, seg)
         assert v.ndim == 0 and torch.isfinite(v), name
         v.backward(retain_graph=True)
@@ -434,10 +518,16 @@ def _self_test() -> None:
     assert torch.isfinite(v) and v.item() == 0.0, 'empty masks must give 0, not NaN'
     print('empty regions   ok   (returns 0, no division by zero)')
 
-    # nested really does give ET a 6x effective weight
-    w_nested = sum(DEFAULT_WEIGHTS['nested'].values())
-    print(f'effective ET weight under nested masks = {w_nested:.0f}x '
-          f'(manuscript claims 3x)')
+    # per-voxel coefficient under nested masks depends on region SIZES
+    n = region_masks(seg, 'nested')
+    sizes = {k: v.sum().item() for k, v in n.items()}
+    coef_et = 1/sizes['WT'] + 2/sizes['TC'] + 3/sizes['ET']
+    coef_ed = 1/sizes['WT']
+    print(f"region sizes    WT={sizes['WT']:.0f}  TC={sizes['TC']:.0f}  "
+          f"ET={sizes['ET']:.0f}")
+    print(f'per-voxel coefficient  ET={coef_et:.5f}  oedema={coef_ed:.5f}  '
+          f'ratio={coef_et/coef_ed:.1f}x')
+    print('  (size-dependent, not a fixed 6:3:1 -- state this in the paper)')
 
     print('\nall checks passed')
 

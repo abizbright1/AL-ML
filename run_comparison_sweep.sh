@@ -51,14 +51,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="$(command -v python3 || command -v python)"
 
 PHASE="${PHASE:-1}"
+# Phases follow the corrected sequence: settle convergence before spending
+# compute on competitors, then add competitors in order of how much they
+# threaten the novelty claim.
 case "$PHASE" in
-  1)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PL3,Uformer+PL3,SwinIR+ROI,Uformer+ROI}" ;;
-  2)   MODELS="${MODELS:-Noisy,Clean,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task}" ;;
-  all) MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PL3,Uformer+PL3,SwinIR+ROI,Uformer+ROI,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task}" ;;
-  *)   echo "PHASE must be 1, 2 or all (got '$PHASE')"; exit 1 ;;
+  0)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR+SSIM,Uformer+SSIM,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task,SwinIR+PLdisj,Uformer+PLdisj}"
+       : "${EPOCHS:=2}" ; : "${SEG_EPOCHS:=2}" ; : "${MAX_SUBJ:=5}" ; : "${SEEDS:=1}" ;;
+  1)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur}"
+       : "${EPOCHS:=100}" ;;
+  2)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR+SSIM,Uformer+SSIM,SwinIR+FlatROI,Uformer+FlatROI}" ;;
+  3)   MODELS="${MODELS:-Noisy,Clean,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task}" ;;
+  4)   MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+PLdisj,Uformer+PLdisj}" ;;
+  *)   echo "PHASE must be 0 (smoke), 1 (convergence), 2 (core competitors),"
+       echo "                 3 (task-aware), or 4 (nested-vs-disjoint ablation)"
+       echo "got '$PHASE'"; exit 1 ;;
 esac
 
 SEEDS="${SEEDS:-1 2 3}"
+# Cohort held FIXED across seeds, so across-seed spread measures training
+# variability alone. --seed previously drove both the weights and the patient
+# split, which confounded them; set SPLIT_SEED= (empty) to restore that.
+SPLIT_SEED="${SPLIT_SEED:-42}"
 EPOCHS="${EPOCHS:-10}"
 SEG_EPOCHS="${SEG_EPOCHS:-10}"
 MAX_SUBJ="${MAX_SUBJ:-100}"
@@ -97,7 +110,7 @@ echo "────────────────────────�
 echo "  data      : $DATA_DIR"
 echo "  arms      : $N_ARMS"
 echo "              $MODELS"
-echo "  seeds     : $SEEDS  ($N_SEEDS)"
+echo "  seeds     : $SEEDS  ($N_SEEDS)   split seed: $SPLIT_SEED (fixed)"
 echo "  epochs    : $EPOCHS (recon) / $SEG_EPOCHS (seg, x2 segmentors)"
 echo "  subjects  : $MAX_SUBJ    device: $DEVICE"
 echo "  output    : $SWEEP_DIR"
@@ -130,6 +143,7 @@ for SEED in $SEEDS; do
     "$PY" "$SCRIPT_DIR/run_full_experiment.py" "$DATA_DIR" \
         --models "$MODELS" \
         --seed "$SEED" \
+        --split_seed "$SPLIT_SEED" \
         --epochs "$EPOCHS" \
         --seg_epochs "$SEG_EPOCHS" \
         --max_subjects "$MAX_SUBJ" \

@@ -34,7 +34,7 @@ if 'comparison_losses' in s:
 # ─────────────────────────────────────────────── 1. imports
 old = "from segmentor import UNetSegmentor, SegTrainer"
 new = """from segmentor import UNetSegmentor, SegTrainer
-from comparison_losses import (PathologyLossCleanTrainer, BinaryROITrainer,
+from comparison_losses import (CurrentPathologyLossTrainer, FlatROITrainer,
                                ROIFeatureTrainer, TaskFeedbackTrainer)"""
 assert s.count(old) == 1, 'import anchor not found'
 s = s.replace(old, new)
@@ -78,23 +78,23 @@ new = """        # ── reference arms: no training, inference only ───�
         # No SSIM term, no cross-modal term, fixed numeric weights, disjoint
         # masks so the stated 3:2:1 is the applied 3:2:1. Quote THIS arm for
         # every PathologyLoss number in the manuscript.
-        'SwinIR + PathologyLoss (Eq.3)': {
+        'SwinIR + PathologyLoss (current, nested)': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: PathologyLossCleanTrainer(
-                m, device=device, lr=1e-4, mode='disjoint'),
+            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
+                m, device=device, lr=1e-4, mode='nested'),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'SwinIR+PL3',
+            'short': 'SwinIR+PLcur',
         },
-        'Uformer + PathologyLoss (Eq.3)': {
+        'Uformer + PathologyLoss (current, nested)': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: PathologyLossCleanTrainer(
-                m, device=device, lr=1e-4, mode='disjoint'),
+            'trainer_fn': lambda m: CurrentPathologyLossTrainer(
+                m, device=device, lr=1e-4, mode='nested'),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'Uformer+PL3',
+            'short': 'Uformer+PLcur',
         },
 
         # ── Binary ROI weighting — Sun et al. 2019 (ROIRecNet) principle ───
@@ -102,21 +102,21 @@ new = """        # ── reference arms: no training, inference only ───�
         # per-region normalisation, no sub-region hierarchy. If this matches
         # the arms above, nesting and clinical priorities contribute nothing
         # and the novelty claim does not survive.
-        'SwinIR + binary ROI [ROIRecNet-style]': {
+        'SwinIR + FlatROI [ROIRecNet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
-            'trainer_fn': lambda m: BinaryROITrainer(m, device=device, lr=1e-4, k=2.0),
+            'trainer_fn': lambda m: FlatROITrainer(m, device=device, lr=1e-4, k=2.0),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'SwinIR+ROI',
+            'short': 'SwinIR+FlatROI',
         },
-        'Uformer + binary ROI [ROIRecNet-style]': {
+        'Uformer + FlatROI [ROIRecNet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: BinaryROITrainer(m, device=device, lr=1e-4, k=2.0),
+            'trainer_fn': lambda m: FlatROITrainer(m, device=device, lr=1e-4, k=2.0),
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
-            'short': 'Uformer+ROI',
+            'short': 'Uformer+FlatROI',
         },
 
         # ── ROI perceptual loss — Chen et al. 2021 (LIDnet) principle ──────
@@ -124,7 +124,7 @@ new = """        # ── reference arms: no training, inference only ───�
         # from seg_aux, NOT from the evaluation segmentor — see the note in
         # main() for why that distinction decides whether the comparison means
         # anything.
-        'SwinIR + ROI feature [LIDnet-style]': {
+        'SwinIR + ROI feature [LIDnet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
             'trainer_fn': lambda m: ROIFeatureTrainer(
@@ -134,7 +134,7 @@ new = """        # ── reference arms: no training, inference only ───�
             'needs_seg_aux': True,
             'short': 'SwinIR+ROIfeat',
         },
-        'Uformer + ROI feature [LIDnet-style]': {
+        'Uformer + ROI feature [LIDnet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
             'trainer_fn': lambda m: ROIFeatureTrainer(
@@ -148,7 +148,7 @@ new = """        # ── reference arms: no training, inference only ───�
         # ── Task feedback — LIDnet's central idea ──────────────────────────
         # Put the downstream loss in the objective rather than a prior about
         # where the downstream task looks. Trains its own copy of seg_aux.
-        'SwinIR + task feedback [LIDnet-style]': {
+        'SwinIR + task feedback [LIDnet-inspired]': {
             'class':  SwinIRLite,
             'config': dict(in_ch=4, dim=64, n_blocks=4, window_size=4),
             'trainer_fn': lambda m: TaskFeedbackTrainer(
@@ -158,7 +158,7 @@ new = """        # ── reference arms: no training, inference only ───�
             'needs_seg_aux': True,
             'short': 'SwinIR+task',
         },
-        'Uformer + task feedback [LIDnet-style]': {
+        'Uformer + task feedback [LIDnet-inspired]': {
             'class':  UformerLite,
             'config': dict(in_ch=4, dim=32, window_size=4),
             'trainer_fn': lambda m: TaskFeedbackTrainer(
