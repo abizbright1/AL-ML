@@ -678,4 +678,32 @@ def make_arm(kind: str, model, device='cpu', lr=1e-4, matched=True,
                                 seg_every=kw.get('seg_every', 0))
         t.base = BaseObjective(ssim_w, xm_w, channels).to(device)
         return t
+    # ── literature baselines: spatially uniform, published objectives ──
+    # Added to the SAME matched base as every other arm, so the only
+    # systematic difference remains the lesion-aware component.
+    from literature_losses import LITERATURE_LOSSES
+    if kind in LITERATURE_LOSSES:
+        term = LITERATURE_LOSSES[kind](channels, kw.get('patch_size', 96))
+        wrapped = (lambda p_, t_, s_: term(p_, t_))      # ignore the seg mask
+        if isinstance(term, nn.Module):
+            wrapped = _SegAgnostic(term)
+        return CompositeTrainer(model, device, lr, ssim_w, xm_w, channels,
+                                lesion=wrapped, lesion_name=kind,
+                                lambda_lesion=kw.get('lam', 1.0))
+
     raise ValueError(f'unknown arm kind {kind!r}')
+
+
+class _SegAgnostic(nn.Module):
+    """Adapt a (pred, target) loss to the (pred, target, seg) arm interface.
+
+    These objectives are spatially uniform by construction -- they never see
+    the mask. That is exactly what makes them the conventional-strength tier.
+    """
+
+    def __init__(self, inner: nn.Module):
+        super().__init__()
+        self.inner = inner
+
+    def forward(self, pred, target, seg_map):
+        return self.inner(pred, target)

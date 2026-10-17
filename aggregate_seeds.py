@@ -87,6 +87,12 @@ METHOD_MAP = {
     'Uformer + ROI feature [LIDnet-inspired]':   ('Uformer', 'ROIFeature'),
     'SwinIR + task feedback [LIDnet-inspired]':  ('SwinIR',  'TaskFeedback'),
     'Uformer + task feedback [LIDnet-inspired]': ('Uformer', 'TaskFeedback'),
+    'Uformer + L2 [Zhao 2017]':                            ('Uformer', 'L2'),
+    'Uformer + MS-SSIM [Zhao 2017]':                       ('Uformer', 'MS-SSIM'),
+    'Uformer + Mix [Zhao 2017]':                           ('Uformer', 'Mix'),
+    'Uformer + high-frequency weighted [DAGAN-inspired]':  ('Uformer', 'HighFreq'),
+    'Uformer + DAGAN-style non-adversarial [Yang 2017]':   ('Uformer', 'DAGAN-style'),
+    'Uformer + VGG perceptual [Johnson 2016]':             ('Uformer', 'VGG'),
     'SwinIR + PathologyLoss (disjoint) [ABLATION]':  ('SwinIR',  'PL-Disjoint'),
     'Uformer + PathologyLoss (disjoint) [ABLATION]': ('Uformer', 'PL-Disjoint'),
 }

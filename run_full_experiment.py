@@ -367,6 +367,65 @@ def build_models(device: str,
             'short': 'Uformer+PLcur',
         },
 
+        # ── LITERATURE BASELINES (Uformer) ────────────────────────────────
+        # Published restoration objectives, all spatially uniform, all on the
+        # same matched base. They answer: does PathologyLoss gain anything
+        # over strong standard losses, or only over plain L1?
+        # pixel-wise L2, the classic restoration default
+        'Uformer + L2 [Zhao 2017]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('l2', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+L2',
+        },
+        # multi-scale structural similarity
+        'Uformer + MS-SSIM [Zhao 2017]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('msssim', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+MSSSIM',
+        },
+        # 0.84*MS-SSIM + 0.16*Gauss-weighted L1, Eq.13
+        'Uformer + Mix [Zhao 2017]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('mix', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+Mix',
+        },
+        # tests whether a uniform loss can hold tumour margins
+        'Uformer + high-frequency weighted [DAGAN-inspired]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('highfreq', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+HighFreq',
+        },
+        # 15*MSE + 0.1*Fourier, no discriminator
+        'Uformer + DAGAN-style non-adversarial [Yang 2017]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('dagan-novgg', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+DAGAN',
+        },
+        # downloads VGG16 weights on first use
+        'Uformer + VGG perceptual [Johnson 2016]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('vgg', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+VGG',
+        },
+
         # ── MATCHED BASE CONTROL — the causal control for PathologyLoss ───
         # Carries every NON-pathology term the as-run treatment carries
         # (L1 + 0.5*SSIM + 0.5*cross-modal) and nothing else. The published
