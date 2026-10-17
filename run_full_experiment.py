@@ -272,7 +272,7 @@ def build_models(device: str,
                  seg_eval: 'UNetSegmentor' = None,
                  seg_aux:  'UNetSegmentor' = None) -> Dict[str, dict]:
     """Round 4 exactly as specified in proposal section 6.5."""
-    return {
+    _models = {
         'PP-MAE-v2 (mask-free) [PROPOSED]': {
             'class':  SwinPPMAEv2,
             'config': dict(in_ch=4, embed_dim=48, depths=(2, 2, 2, 2),
@@ -365,125 +365,6 @@ def build_models(device: str,
             'infer_fn':   lambda m, noisy, seg: m(noisy),
             'uses_mask_at_inference': False,
             'short': 'Uformer+PLcur',
-        },
-
-        # ── LITERATURE BASELINES (Uformer) ────────────────────────────────
-        # Published restoration objectives, all spatially uniform, all on the
-        # same matched base. They answer: does PathologyLoss gain anything
-        # over strong standard losses, or only over plain L1?
-        # pixel-wise L2, the classic restoration default
-        'Uformer + L2 [Zhao 2017]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('l2', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+L2',
-        },
-        # multi-scale structural similarity
-        'Uformer + MS-SSIM [Zhao 2017]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('msssim', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+MSSSIM',
-        },
-        # 0.84*MS-SSIM + 0.16*Gauss-weighted L1, Eq.13
-        'Uformer + Mix [Zhao 2017]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('mix', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+Mix',
-        },
-        # tests whether a uniform loss can hold tumour margins
-        'Uformer + high-frequency weighted [DAGAN-inspired]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('highfreq', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+HighFreq',
-        },
-        # 15*MSE + 0.1*Fourier, no discriminator
-        'Uformer + DAGAN-style non-adversarial [Yang 2017]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('dagan-novgg', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+DAGAN',
-        },
-        # downloads VGG16 weights on first use
-        'Uformer + VGG perceptual [Johnson 2016]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('vgg', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+VGG',
-        },
-
-        # ── MORE LITERATURE BASELINES (Uformer) ───────────────────────────
-        # BraSyn's masked L1 is the closest published prior art: region
-        # decomposition with per-region size normalisation, on BraTS.
-        'Uformer + SSIM w=5 [Zhao 2017]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('ssim5', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+SSIM5',
-        },
-        'Uformer + SSIM w=9 [Zhao 2017]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('ssim9', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+SSIM9',
-        },
-        'Uformer + L2+MS-SSIM [Zhao 2017 ablation]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('l2-msssim', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+L2MSSSIM',
-        },
-        'Uformer + total variation [Johnson 2016]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('tv', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+TV',
-        },
-        'Uformer + low/high frequency split [BraSyn 2023]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('brasyn-freq', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+BSFreq',
-        },
-        'Uformer + masked L1 w=0.5 [BraSyn 2023]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('brasyn-maskedl1', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+BSMaskL1',
-        },
-        'Uformer + BraSyn combined non-adversarial [BraSyn 2023]': {
-            'class':  UformerLite,
-            'config': dict(in_ch=4, dim=32, window_size=4),
-            'trainer_fn': lambda m: make_arm('brasyn-combined', m, device=device, lr=1e-4),
-            'infer_fn':   lambda m, noisy, seg: m(noisy),
-            'uses_mask_at_inference': False,
-            'short': 'Uformer+BSComb',
         },
 
         # ── MATCHED BASE CONTROL — the causal control for PathologyLoss ───
@@ -637,6 +518,57 @@ def build_models(device: str,
             'short': 'Uformer+PL',
         },
     }
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  LITERATURE BASELINES — every published objective on BOTH backbones
+    # ═══════════════════════════════════════════════════════════════════
+    #
+    # Generated rather than hand-written, so a loss cannot silently exist on
+    # one backbone and not the other. Each arm sits on the SAME matched base
+    # as PathologyLoss, so the objective stays the only systematic
+    # difference, and every arm is scored by the same frozen segmentor on
+    # downstream Dice.
+    #
+    # Zhao et al., IEEE TCI 2017 . Johnson et al., ECCV 2016 .
+    # Yang et al., IEEE TMI 2017 (DAGAN) . Baltruschat et al., BraSyn 2023.
+    # Adapted arms carry "-style"/"-inspired" and must be reported that way,
+    # never under the original method's name.
+
+    _BACKBONES = {
+        'SwinIR':  (SwinIRLite,  dict(in_ch=4, dim=64, n_blocks=4, window_size=4)),
+        'Uformer': (UformerLite, dict(in_ch=4, dim=32, window_size=4)),
+    }
+
+    _LIT = [
+        ('l2',              'L2',       'L2 [Zhao 2017]'),
+        ('ssim5',           'SSIM5',    'SSIM w=5 [Zhao 2017]'),
+        ('ssim9',           'SSIM9',    'SSIM w=9 [Zhao 2017]'),
+        ('msssim',          'MSSSIM',   'MS-SSIM [Zhao 2017]'),
+        ('mix',             'Mix',      'Mix MS-SSIM+L1 [Zhao 2017]'),
+        ('l2-msssim',       'L2MSSSIM', 'L2+MS-SSIM [Zhao 2017 ablation]'),
+        ('tv',              'TV',       'total variation [Johnson 2016]'),
+        ('vgg',             'VGG',      'VGG perceptual [Johnson 2016]'),
+        ('highfreq',        'HighFreq', 'high-frequency weighted [DAGAN-inspired]'),
+        ('dagan-novgg',     'DAGAN',    'DAGAN-style non-adversarial [Yang 2017]'),
+        ('brasyn-freq',     'BSFreq',   'low/high frequency split [BraSyn 2023]'),
+        ('brasyn-maskedl1', 'BSMaskL1', 'masked L1 w=0.5 [BraSyn 2023]'),
+        ('brasyn-combined', 'BSComb',   'BraSyn combined non-adversarial [BraSyn 2023]'),
+    ]
+
+    for _bb, (_cls, _cfg) in _BACKBONES.items():
+        for _kind, _suffix, _desc in _LIT:
+            _models[f'{_bb} + {_desc}'] = {
+                'class':  _cls,
+                'config': dict(_cfg),
+                'trainer_fn': (lambda m, _k=_kind:
+                               make_arm(_k, m, device=device, lr=1e-4)),
+                'infer_fn':   lambda m, noisy, seg: m(noisy),
+                'uses_mask_at_inference': False,
+                'short': f'{_bb}+{_suffix}',
+            }
+
+    return _models
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════

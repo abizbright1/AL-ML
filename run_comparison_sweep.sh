@@ -55,16 +55,32 @@ PHASE="${PHASE:-1}"
 # compute on competitors, then add competitors in order of how much they
 # threaten the novelty claim.
 case "$PHASE" in
-  0)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR-Base,Uformer-Base,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task,SwinIR+PLdisj,Uformer+PLdisj}"
+  0)   # smoke: everything, tiny, one seed -- proves the plumbing only
+       MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR-Base,Uformer-Base,SwinIR+PLcur,Uformer+PLcur,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+BSMaskL1,Uformer+BSMaskL1,SwinIR+Mix,Uformer+Mix,SwinIR+BSFreq,Uformer+BSFreq}"
        : "${EPOCHS:=2}" ; : "${SEG_EPOCHS:=2}" ; : "${MAX_SUBJ:=5}" ; : "${SEEDS:=1}" ;;
-  1)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur}"
+
+  1)   # convergence triage: does the effect survive to 100 epochs?
+       MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur}"
        : "${EPOCHS:=100}" ;;
-  2)   MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR+PLcur,Uformer+PLcur,SwinIR-Base,Uformer-Base,SwinIR+FlatROI,Uformer+FlatROI}" ;;
-  3)   MODELS="${MODELS:-Noisy,Clean,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task}" ;;
-  4)   MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+PLdisj,Uformer+PLdisj}" ;;
-  *)   echo "PHASE must be 0 (smoke), 1 (convergence), 2 (core competitors),"
-       echo "                 3 (task-aware), or 4 (nested-vs-disjoint ablation)"
-       echo "got '$PHASE'"; exit 1 ;;
+
+  2)   # THE DECISIVE CONTRASTS. PathologyLoss against its matched base, flat
+       # binary ROI weighting, and BraSyn's masked L1 -- the closest published
+       # prior art. Both backbones. If PathologyLoss does not beat BSMaskL1,
+       # the remaining novelty is the nesting and the clinical ordering alone.
+       MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR-Base,Uformer-Base,SwinIR+PLcur,Uformer+PLcur,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+BSMaskL1,Uformer+BSMaskL1}" ;;
+
+  3)   # full conventional tier: every published spatially-uniform objective
+       MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+L2,Uformer+L2,SwinIR+SSIM9,Uformer+SSIM9,SwinIR+MSSSIM,Uformer+MSSSIM,SwinIR+Mix,Uformer+Mix,SwinIR+BSFreq,Uformer+BSFreq,SwinIR+TV,Uformer+TV,SwinIR+DAGAN,Uformer+DAGAN,SwinIR+BSComb,Uformer+BSComb}" ;;
+
+  4)   # task-aware tier (LIDnet-inspired)
+       MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+ROIfeat,Uformer+ROIfeat,SwinIR+task,Uformer+task}" ;;
+
+  5)   # ablation: does the nested BraTS hierarchy contribute anything?
+       MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+PLdisj,Uformer+PLdisj}" ;;
+
+  *)   echo "PHASE must be 0 (smoke) 1 (convergence) 2 (decisive) 3 (conventional tier)"
+       echo "                 4 (task-aware) or 5 (nested-vs-disjoint ablation); got '$PHASE'"
+       exit 1 ;;
 esac
 
 SEEDS="${SEEDS:-1 2 3}"

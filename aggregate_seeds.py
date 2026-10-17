@@ -87,22 +87,36 @@ METHOD_MAP = {
     'Uformer + ROI feature [LIDnet-inspired]':   ('Uformer', 'ROIFeature'),
     'SwinIR + task feedback [LIDnet-inspired]':  ('SwinIR',  'TaskFeedback'),
     'Uformer + task feedback [LIDnet-inspired]': ('Uformer', 'TaskFeedback'),
-    'Uformer + L2 [Zhao 2017]':                            ('Uformer', 'L2'),
     'Uformer + MS-SSIM [Zhao 2017]':                       ('Uformer', 'MS-SSIM'),
-    'Uformer + Mix [Zhao 2017]':                           ('Uformer', 'Mix'),
     'Uformer + high-frequency weighted [DAGAN-inspired]':  ('Uformer', 'HighFreq'),
-    'Uformer + DAGAN-style non-adversarial [Yang 2017]':   ('Uformer', 'DAGAN-style'),
     'Uformer + VGG perceptual [Johnson 2016]':             ('Uformer', 'VGG'),
-    'Uformer + SSIM w=5 [Zhao 2017]':                      ('Uformer', 'SSIM5'),
     'Uformer + SSIM w=9 [Zhao 2017]':                      ('Uformer', 'SSIM9'),
-    'Uformer + L2+MS-SSIM [Zhao 2017 ablation]':           ('Uformer', 'L2+MS-SSIM'),
     'Uformer + total variation [Johnson 2016]':            ('Uformer', 'TV'),
-    'Uformer + low/high frequency split [BraSyn 2023]':    ('Uformer', 'BraSyn-Freq'),
     'Uformer + masked L1 w=0.5 [BraSyn 2023]':             ('Uformer', 'BraSyn-MaskedL1'),
-    'Uformer + BraSyn combined non-adversarial [BraSyn 2023]': ('Uformer', 'BraSyn-Combined'),
     'SwinIR + PathologyLoss (disjoint) [ABLATION]':  ('SwinIR',  'PL-Disjoint'),
     'Uformer + PathologyLoss (disjoint) [ABLATION]': ('Uformer', 'PL-Disjoint'),
 }
+
+# Literature baselines exist on BOTH backbones, so their names are generated
+# the same way build_models() generates the arms. Hand-listing them invites a
+# silent mismatch between what was trained and what the analysis recognises.
+for _bb in ('SwinIR', 'Uformer'):
+    for _desc, _loss in [
+        ('L2 [Zhao 2017]',                                  'L2'),
+        ('SSIM w=5 [Zhao 2017]',                            'SSIM5'),
+        ('SSIM w=9 [Zhao 2017]',                            'SSIM9'),
+        ('MS-SSIM [Zhao 2017]',                             'MS-SSIM'),
+        ('Mix MS-SSIM+L1 [Zhao 2017]',                      'Mix'),
+        ('L2+MS-SSIM [Zhao 2017 ablation]',                 'L2+MS-SSIM'),
+        ('total variation [Johnson 2016]',                  'TV'),
+        ('VGG perceptual [Johnson 2016]',                   'VGG'),
+        ('high-frequency weighted [DAGAN-inspired]',        'HighFreq'),
+        ('DAGAN-style non-adversarial [Yang 2017]',         'DAGAN-style'),
+        ('low/high frequency split [BraSyn 2023]',          'BraSyn-Freq'),
+        ('masked L1 w=0.5 [BraSyn 2023]',                   'BraSyn-MaskedL1'),
+        ('BraSyn combined non-adversarial [BraSyn 2023]',   'BraSyn-Combined'),
+    ]:
+        METHOD_MAP[f'{_bb} + {_desc}'] = (_bb, _loss)
 
 
 def parse_args():
