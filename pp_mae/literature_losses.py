@@ -326,3 +326,194 @@ def _self_test() -> None:
 
 if __name__ == '__main__':
     _self_test()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  BraSyn 2023 (Baltruschat, Janbakhshi & Lenga, Bayer AG; arXiv:2403.07800v2)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# The closest published prior art to PathologyLoss, and on BraTS.
+#
+#   L1^t = E|y^t - G(x)^t| / |M^t|          (Eq. 2)  tumour, size-normalised
+#   L1^h = E|y^h - G(x)^h| / |M^h|          (Eq. 3)  healthy, size-normalised
+#   L1^M = w*L1^t + (1-w)*L1^h,  w = 0.5    (Eq. 4)
+#
+# Region decomposition, per-region normalisation by |M_r| and explicit
+# inter-region weighting are all present. PathologyLoss differs by using
+# THREE nested clinical sub-regions instead of two, a clinical priority
+# ordering instead of w = 0.5, and a downstream segmentation endpoint instead
+# of region-wise SSIM/PSNR. Those are the differences the benchmark must
+# measure; the normalisation itself is not novel.
+
+class MaskedL1Loss(nn.Module):
+    """BraSyn Eq. 4. Two regions, size-normalised, weighted."""
+
+    def __init__(self, w: float = 0.5):
+        super().__init__()
+        self.w = w
+
+    def forward(self, pred, target, seg_map):
+        err = (pred - target).abs()
+        mt = (seg_map > 0).float()
+        mh = 1.0 - mt
+        nt, nh = mt.sum(), mh.sum()
+        C = pred.shape[1]
+        lt = (err * mt).sum() / (nt * C) if nt.item() > 0 else torch.zeros((), device=pred.device)
+        lh = (err * mh).sum() / (nh * C) if nh.item() > 0 else torch.zeros((), device=pred.device)
+        return self.w * lt + (1.0 - self.w) * lh
+
+
+class BraSynFreqLoss(nn.Module):
+    """BraSyn Eq. 8: split the spectrum at radius r and penalise both halves.
+
+        L = E| |F(y)| (*) M_r  -  |F(G(x))| (*) M_r |
+          + E| |F(y)| (*) M_r' -  |F(G(x))| (*) M_r' |
+
+    M_r is a disc of radius r about the origin (low frequencies), M_r' its
+    complement (high frequencies). The paper uses r = 21 and works on
+    MAGNITUDE spectra, which is why this does not collapse into pixel MSE the
+    way an unweighted complex Fourier MSE does.
+    """
+
+    def __init__(self, radius: int = 21):
+        super().__init__()
+        self.radius = radius
+        self._cache = {}
+
+    def _masks(self, H, W, device):
+        key = (H, W, device)
+        if key not in self._cache:
+            fy = torch.fft.fftfreq(H, device=device).view(-1, 1) * H
+            fx = torch.fft.fftfreq(W, device=device).view(1, -1) * W
+            r = (fy ** 2 + fx ** 2).sqrt()
+            lo = (r <= self.radius).float()
+            self._cache[key] = (lo, 1.0 - lo)
+        return self._cache[key]
+
+    def forward(self, pred, target):
+        fp = torch.fft.fft2(pred.float(), norm='ortho').abs()
+        ft = torch.fft.fft2(target.float(), norm='ortho').abs()
+        lo, hi = self._masks(pred.shape[-2], pred.shape[-1], pred.device)
+        return ((ft * lo - fp * lo).abs().mean()
+                + (ft * hi - fp * hi).abs().mean())
+
+
+class BraSynVGGLoss(nn.Module):
+    """BraSyn Eq. (perceptual): VGG-19, layers {2,7,14,21,28}, published lambdas."""
+
+    LAYERS = (2, 7, 14, 21, 28)
+    LAMBDAS = (0.0002, 0.0001, 0.0001, 0.0002, 0.0005)
+
+    def __init__(self, weights: Optional[str] = 'DEFAULT'):
+        super().__init__()
+        from torchvision.models import vgg19
+        feats = list(vgg19(weights=weights).features.children())
+        self.blocks = nn.ModuleList(
+            [nn.Sequential(*feats[(0 if i == 0 else self.LAYERS[i - 1]):l])
+             for i, l in enumerate(self.LAYERS)]).eval()
+        for p in self.parameters():
+            p.requires_grad_(False)
+        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+
+    def _prep(self, x):
+        C = x.shape[1]
+        x = x.repeat(1, 3, 1, 1) if C == 1 else (
+            x if C == 3 else torch.cat([x[:, i:i + 3] if i + 3 <= C else x[:, -3:]
+                                        for i in range(0, C, 3)], dim=0))
+        return (x - self.mean.to(x.device)) / self.std.to(x.device)
+
+    def forward(self, pred, target):
+        a, b = self._prep(pred), self._prep(target)
+        total = torch.zeros((), device=pred.device)
+        for blk, lam in zip(self.blocks, self.LAMBDAS):
+            a = blk(a)
+            with torch.no_grad():
+                b = blk(b)
+            total = total + (lam * (a - b)).pow(2).mean()
+        return total
+
+
+class BraSynCombined(nn.Module):
+    """BraSyn's tuned combination, minus the adversarial term.
+
+        L = 5*L1^M + L_SSIM + L_VGG + L_Freq       (L_adv omitted)
+
+    The paper's L_combined also carries L_adv from an LSGAN discriminator.
+    This pipeline has no discriminator, so that term is dropped and the arm is
+    labelled "non-adversarial". Do not present it as BraSyn's combined loss.
+    """
+
+    def __init__(self, channel: int = 4, use_vgg: bool = True,
+                 vgg_weights: Optional[str] = 'DEFAULT'):
+        super().__init__()
+        self.ml1 = MaskedL1Loss(w=0.5)
+        self.freq = BraSynFreqLoss(radius=21)
+        self.vgg = BraSynVGGLoss(weights=vgg_weights) if use_vgg else None
+        from losses import SSIMLoss
+        self.ssim = SSIMLoss(channel=channel)
+
+    def forward(self, pred, target, seg_map):
+        total = 5.0 * self.ml1(pred, target, seg_map) \
+            + self.ssim(pred, target) + self.freq(pred, target)
+        if self.vgg is not None:
+            total = total + self.vgg(pred, target)
+        return total
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Remaining terms from the supplied papers
+# ═══════════════════════════════════════════════════════════════════════════
+
+class SSIMWindowLoss(nn.Module):
+    """Zhao et al. evaluate SSIM at several window sizes (SSIM5, SSIM9)."""
+
+    def __init__(self, channel: int = 4, window_size: int = 9):
+        super().__init__()
+        self.ws = window_size
+        self.register_buffer('win', _gaussian_window(window_size, 1.5, channel))
+        self.channel = channel
+
+    def forward(self, pred, target):
+        ssim, _ = _ssim_maps(pred, target, self.win.to(pred.device),
+                             self.ws // 2, self.channel)
+        return 1.0 - ssim.mean()
+
+
+class L2MSSSIMLoss(nn.Module):
+    """Zhao et al.'s ablation: is l1 critical to Mix, or would l2 do?"""
+
+    def __init__(self, channel: int = 4, alpha: float = 0.84, patch_size: int = 96):
+        super().__init__()
+        self.alpha = alpha
+        self.msssim = MSSSIMLoss(channel=channel, patch_size=patch_size)
+
+    def forward(self, pred, target):
+        return self.alpha * self.msssim(pred, target) \
+            + (1.0 - self.alpha) * F.mse_loss(pred, target)
+
+
+class TotalVariationLoss(nn.Module):
+    """Johnson et al.'s total-variation regulariser, for output smoothness."""
+
+    def forward(self, pred, target=None):
+        dh = (pred[:, :, 1:, :] - pred[:, :, :-1, :]).abs().mean()
+        dw = (pred[:, :, :, 1:] - pred[:, :, :, :-1]).abs().mean()
+        return dh + dw
+
+
+LITERATURE_LOSSES.update({
+    'ssim5':      lambda ch, ps: SSIMWindowLoss(channel=ch, window_size=5),
+    'ssim9':      lambda ch, ps: SSIMWindowLoss(channel=ch, window_size=9),
+    'l2-msssim':  lambda ch, ps: L2MSSSIMLoss(channel=ch, patch_size=ps),
+    'tv':         lambda ch, ps: TotalVariationLoss(),
+    'brasyn-freq': lambda ch, ps: BraSynFreqLoss(radius=21),
+    'brasyn-vgg': lambda ch, ps: BraSynVGGLoss(),
+})
+
+# Mask-aware arms take (pred, target, seg) and are dispatched separately.
+LITERATURE_LOSSES_MASKED = {
+    'brasyn-maskedl1': lambda ch, ps: MaskedL1Loss(w=0.5),
+    'brasyn-combined': lambda ch, ps: BraSynCombined(channel=ch, use_vgg=False),
+    'brasyn-combined-vgg': lambda ch, ps: BraSynCombined(channel=ch, use_vgg=True),
+}

@@ -681,7 +681,13 @@ def make_arm(kind: str, model, device='cpu', lr=1e-4, matched=True,
     # ── literature baselines: spatially uniform, published objectives ──
     # Added to the SAME matched base as every other arm, so the only
     # systematic difference remains the lesion-aware component.
-    from literature_losses import LITERATURE_LOSSES
+    from literature_losses import LITERATURE_LOSSES, LITERATURE_LOSSES_MASKED
+    if kind in LITERATURE_LOSSES_MASKED:          # already takes (pred,target,seg)
+        return CompositeTrainer(model, device, lr, ssim_w, xm_w, channels,
+                                lesion=LITERATURE_LOSSES_MASKED[kind](
+                                    channels, kw.get('patch_size', 96)),
+                                lesion_name=kind,
+                                lambda_lesion=kw.get('lam', 1.0))
     if kind in LITERATURE_LOSSES:
         term = LITERATURE_LOSSES[kind](channels, kw.get('patch_size', 96))
         wrapped = (lambda p_, t_, s_: term(p_, t_))      # ignore the seg mask

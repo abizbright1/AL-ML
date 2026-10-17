@@ -426,6 +426,66 @@ def build_models(device: str,
             'short': 'Uformer+VGG',
         },
 
+        # ── MORE LITERATURE BASELINES (Uformer) ───────────────────────────
+        # BraSyn's masked L1 is the closest published prior art: region
+        # decomposition with per-region size normalisation, on BraTS.
+        'Uformer + SSIM w=5 [Zhao 2017]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('ssim5', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+SSIM5',
+        },
+        'Uformer + SSIM w=9 [Zhao 2017]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('ssim9', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+SSIM9',
+        },
+        'Uformer + L2+MS-SSIM [Zhao 2017 ablation]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('l2-msssim', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+L2MSSSIM',
+        },
+        'Uformer + total variation [Johnson 2016]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('tv', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+TV',
+        },
+        'Uformer + low/high frequency split [BraSyn 2023]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('brasyn-freq', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+BSFreq',
+        },
+        'Uformer + masked L1 w=0.5 [BraSyn 2023]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('brasyn-maskedl1', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+BSMaskL1',
+        },
+        'Uformer + BraSyn combined non-adversarial [BraSyn 2023]': {
+            'class':  UformerLite,
+            'config': dict(in_ch=4, dim=32, window_size=4),
+            'trainer_fn': lambda m: make_arm('brasyn-combined', m, device=device, lr=1e-4),
+            'infer_fn':   lambda m, noisy, seg: m(noisy),
+            'uses_mask_at_inference': False,
+            'short': 'Uformer+BSComb',
+        },
+
         # ── MATCHED BASE CONTROL — the causal control for PathologyLoss ───
         # Carries every NON-pathology term the as-run treatment carries
         # (L1 + 0.5*SSIM + 0.5*cross-modal) and nothing else. The published

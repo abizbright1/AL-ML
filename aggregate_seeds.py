@@ -93,6 +93,13 @@ METHOD_MAP = {
     'Uformer + high-frequency weighted [DAGAN-inspired]':  ('Uformer', 'HighFreq'),
     'Uformer + DAGAN-style non-adversarial [Yang 2017]':   ('Uformer', 'DAGAN-style'),
     'Uformer + VGG perceptual [Johnson 2016]':             ('Uformer', 'VGG'),
+    'Uformer + SSIM w=5 [Zhao 2017]':                      ('Uformer', 'SSIM5'),
+    'Uformer + SSIM w=9 [Zhao 2017]':                      ('Uformer', 'SSIM9'),
+    'Uformer + L2+MS-SSIM [Zhao 2017 ablation]':           ('Uformer', 'L2+MS-SSIM'),
+    'Uformer + total variation [Johnson 2016]':            ('Uformer', 'TV'),
+    'Uformer + low/high frequency split [BraSyn 2023]':    ('Uformer', 'BraSyn-Freq'),
+    'Uformer + masked L1 w=0.5 [BraSyn 2023]':             ('Uformer', 'BraSyn-MaskedL1'),
+    'Uformer + BraSyn combined non-adversarial [BraSyn 2023]': ('Uformer', 'BraSyn-Combined'),
     'SwinIR + PathologyLoss (disjoint) [ABLATION]':  ('SwinIR',  'PL-Disjoint'),
     'Uformer + PathologyLoss (disjoint) [ABLATION]': ('Uformer', 'PL-Disjoint'),
 }
