@@ -80,7 +80,7 @@ from option_baselines import (
     UformerLite, UformerTrainer, UformerPathologyTrainer,
 )
 from segmentor import UNetSegmentor, SegTrainer
-from comparison_losses import make_arm
+from comparison_losses import make_arm, CompositeTrainer, RegionWeightedL1
 from brats_loader import BraTSDataset
 from evaluation import psnr, ssim_numpy, nrmse
 
@@ -206,6 +206,50 @@ def region_mask(seg: np.ndarray, region: str) -> np.ndarray:
     if region == 'ET':
         return seg == 3
     raise ValueError(region)
+
+
+def region_psnr(pred: np.ndarray, target: np.ndarray,
+                seg: np.ndarray, region: str) -> float:
+    """PSNR computed ONLY inside a tumour region.
+
+    Whole-image PSNR is dominated by the ~99% of voxels that are not tumour,
+    which is precisely the imbalance this study argues about. A claim about
+    lesion fidelity has to be measured where the lesion is, or a whole-image
+    number can hide it in either direction.
+
+    Returns NaN when the region is absent from the ground truth, matching the
+    convention used for Dice, so an absent region is never scored as perfect.
+    """
+    m = {'WT': seg > 0,
+         'TC': (seg == 1) | (seg == 3),
+         'ET': seg == 3}[region]
+    if m.sum() == 0:
+        return float('nan')
+    mask = np.broadcast_to(m[..., None], pred.shape)
+    mse = float(((pred[mask] - target[mask]) ** 2).mean())
+    return float('inf') if mse <= 0 else float(10.0 * np.log10(1.0 / mse))
+
+
+def brain_mask_ssim(pred: np.ndarray, target: np.ndarray,
+                    thresh: float = 1e-6) -> float:
+    """SSIM restricted to brain voxels.
+
+    BraTS volumes are skull-stripped, so a large share of every slice is
+    exact zero in both images. Those voxels agree perfectly and inflate
+    whole-image SSIM toward 1 regardless of how the restoration performed.
+    Masking them out makes the number mean something.
+    """
+    brain = (target > thresh).any(axis=-1)
+    if brain.sum() == 0:
+        return float('nan')
+    p = np.where(brain[..., None], pred, np.nan)
+    t = np.where(brain[..., None], target, np.nan)
+    mu_p, mu_t = np.nanmean(p), np.nanmean(t)
+    vp, vt = np.nanvar(p), np.nanvar(t)
+    cov = np.nanmean((p - mu_p) * (t - mu_t))
+    C1, C2 = 0.01 ** 2, 0.03 ** 2
+    return float(((2 * mu_p * mu_t + C1) * (2 * cov + C2)) /
+                 ((mu_p ** 2 + mu_t ** 2 + C1) * (vp + vt + C2)))
 
 
 def dice(pred_seg: np.ndarray, gt_seg: np.ndarray, region: str) -> float:
@@ -555,6 +599,26 @@ def build_models(device: str,
         ('brasyn-combined', 'BSComb',   'BraSyn combined non-adversarial [BraSyn 2023]'),
     ]
 
+    # ── weight ablations: is 3:2:1 doing the work, or just "weight tumour"? ──
+    # 1:1:1 removes the clinical ordering but keeps the nesting and the
+    # per-region normalisation. 3:0:0 keeps only the enhancing tumour. Both
+    # are OUR OWN design, not from the literature, and isolate which part of
+    # the construction earns its place.
+    for _bb, (_cls, _cfg) in _BACKBONES.items():
+        for _tag, _w in [('Equal', {'WT': 1.0, 'TC': 1.0, 'ET': 1.0}),
+                         ('ETonly', {'WT': 0.0, 'TC': 0.0, 'ET': 3.0})]:
+            _models[f'{_bb} + PathologyLoss {_tag} weights [ABLATION]'] = {
+                'class':  _cls,
+                'config': dict(_cfg),
+                'trainer_fn': (lambda m, _ww=_w: CompositeTrainer(
+                    m, device, 1e-4, 0.5, 0.5, 4,
+                    lesion=RegionWeightedL1('nested', weights=_ww),
+                    lesion_name='pathology')),
+                'infer_fn':   lambda m, noisy, seg: m(noisy),
+                'uses_mask_at_inference': False,
+                'short': f'{_bb}+PL{_tag}',
+            }
+
     for _bb, (_cls, _cfg) in _BACKBONES.items():
         for _kind, _suffix, _desc in _LIT:
             _models[f'{_bb} + {_desc}'] = {
@@ -684,6 +748,12 @@ def evaluate_and_dump(model, spec, val_loader, seg_model, device,
                 'dice_wt': dice(seg_pred[i], seg_gt[i], 'WT'),
                 'dice_tc': dice(seg_pred[i], seg_gt[i], 'TC'),
                 'dice_et': dice(seg_pred[i], seg_gt[i], 'ET'),
+                # Region-restricted fidelity. The claim is local, so the
+                # measurement has to be local too.
+                'psnr_wt': region_psnr(p_np, t_np, seg_gt[i], 'WT'),
+                'psnr_tc': region_psnr(p_np, t_np, seg_gt[i], 'TC'),
+                'psnr_et': region_psnr(p_np, t_np, seg_gt[i], 'ET'),
+                'ssim_brain': brain_mask_ssim(p_np, t_np),
             }
             per_slice.append(row)
 

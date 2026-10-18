@@ -53,7 +53,8 @@ import sys
 from collections import defaultdict
 
 
-METRICS = ['psnr', 'ssim', 'nrmse', 'dice_wt', 'dice_tc', 'dice_et']
+METRICS = ['psnr', 'ssim', 'nrmse', 'dice_wt', 'dice_tc', 'dice_et',
+           'psnr_wt', 'psnr_tc', 'psnr_et', 'ssim_brain']
 
 # Method name (as written into per_slice_metrics.csv) -> (backbone, loss).
 # `loss` is the factor under test; `backbone` is the factor it must generalise
@@ -117,6 +118,8 @@ for _bb in ('SwinIR', 'Uformer'):
         ('BraSyn combined non-adversarial [BraSyn 2023]',   'BraSyn-Combined'),
     ]:
         METHOD_MAP[f'{_bb} + {_desc}'] = (_bb, _loss)
+    for _tag, _nm in [('Equal', 'PL-EqualWeights'), ('ETonly', 'PL-ETonly')]:
+        METHOD_MAP[f'{_bb} + PathologyLoss {_tag} weights [ABLATION]'] = (_bb, _nm)
 
 
 def parse_args():

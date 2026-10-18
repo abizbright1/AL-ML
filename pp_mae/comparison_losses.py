@@ -713,3 +713,83 @@ class _SegAgnostic(nn.Module):
 
     def forward(self, pred, target, seg_map):
         return self.inner(pred, target)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Correctness tests the next-steps report asks for (its step 5)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def verify_loss_invariants(verbose: bool = True) -> bool:
+    """Two checks that catch coding mistakes before any GPU time is spent.
+
+      A. A perfect reconstruction scores zero. Any loss that does not is
+         either mis-normalised or carries a constant, and a constant makes
+         cross-arm totals incomparable.
+
+      B. PathologyLoss with all region weights set to zero reduces exactly to
+         its base. This is the one test that proves the region term is the
+         ONLY thing the arm adds -- the whole experiment rests on it.
+    """
+    ok = True
+    B, C, H = 2, 4, 64
+    x = torch.rand(B, C, H, H)
+    seg = torch.zeros(B, 1, H, H, dtype=torch.long)
+    seg[:, :, 16:48, 16:48] = 2
+    seg[:, :, 24:40, 24:40] = 1
+    seg[:, :, 28:36, 28:36] = 3
+
+    if verbose:
+        print('  A. perfect reconstruction -> zero')
+    from literature_losses import LITERATURE_LOSSES, LITERATURE_LOSSES_MASKED
+    zero_exempt = {'tv'}          # TV penalises the output itself, not the error
+    for name, mk in sorted(LITERATURE_LOSSES.items()):
+        if 'vgg' in name or name == 'dagan':
+            continue              # need weights; covered separately
+        v = float(mk(C, H)(x, x))
+        good = abs(v) < 1e-5 or name in zero_exempt
+        ok &= good
+        if verbose:
+            tag = 'ok' if abs(v) < 1e-5 else ('by design' if name in zero_exempt else 'FAIL')
+            print(f'     {name:<16} {v:12.3e}   {tag}')
+    for name, mk in sorted(LITERATURE_LOSSES_MASKED.items()):
+        if 'vgg' in name:
+            continue
+        v = float(mk(C, H)(x, x, seg))
+        ok &= abs(v) < 1e-5
+        if verbose:
+            print(f'     {name:<16} {v:12.3e}   {"ok" if abs(v) < 1e-5 else "FAIL"}')
+    v = float(RegionWeightedL1('nested')(x, x, seg))
+    ok &= abs(v) < 1e-5
+    if verbose:
+        print(f'     {"pathology":<16} {v:12.3e}   {"ok" if abs(v) < 1e-5 else "FAIL"}')
+
+    if verbose:
+        print('\n  B. PathologyLoss with zero weights == its base')
+    y = torch.rand(B, C, H, H)
+    zero_w = RegionWeightedL1('nested', weights={'WT': 0.0, 'TC': 0.0, 'ET': 0.0})
+    v = float(zero_w(y, x, seg))
+    ok &= abs(v) < 1e-9
+    if verbose:
+        print(f'     region term with w=0           {v:.3e}   '
+              f'{"ok" if abs(v) < 1e-9 else "FAIL"}')
+
+    m = nn.Conv2d(C, C, 3, padding=1)
+    torch.manual_seed(0)
+    t_l1 = make_arm('l1', type(m)(C, C, 3, padding=1))
+    torch.manual_seed(0)
+    t_pl0 = CompositeTrainer(type(m)(C, C, 3, padding=1), 'cpu', 1e-4, 0.0, 0.0, C,
+                             lesion=zero_w, lesion_name='pathology')
+    batch = {'noisy': torch.rand(B, C, H, H), 'target': x, 'seg': seg}
+    a = t_l1.step(batch)['total']
+    b = t_pl0.step(batch)['total']
+    same = abs(a - b) < 1e-6
+    ok &= same
+    if verbose:
+        print(f'     L1 arm {a:.8f} vs zero-weight PathologyLoss arm {b:.8f}')
+        print(f'     identical: {same}')
+        print(f'\n  {"ALL INVARIANTS HOLD" if ok else "INVARIANT VIOLATED -- do not run the sweep"}')
+    return ok
+
+
+if __name__ == '__main__':
+    verify_loss_invariants()
