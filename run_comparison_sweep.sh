@@ -55,6 +55,19 @@ PHASE="${PHASE:-1}"
 # compute on competitors, then add competitors in order of how much they
 # threaten the novelty claim.
 case "$PHASE" in
+  uformer|U)
+       # EVERYTHING on Uformer, one invocation. Both segmentors are trained
+       # once, so every loss is scored by the identical frozen judge and the
+       # objective is the only thing that differs anywhere in the comparison.
+       MODELS="${MODELS:-Noisy,Clean,Uformer-L1,Uformer-Base,Uformer+PLcur,Uformer+FlatROI,Uformer+BSMaskL1,Uformer+L2,Uformer+SSIM5,Uformer+SSIM9,Uformer+MSSSIM,Uformer+Mix,Uformer+L2MSSSIM,Uformer+TV,Uformer+HighFreq,Uformer+BSFreq,Uformer+DAGAN,Uformer+BSComb,Uformer+PLEqual,Uformer+PLETonly}" ;;
+
+  uformer-fast|UF)
+       # Same arms, half the cohort. Use when 30+ hours is not available;
+       # the ranking is what matters and it survives a smaller test set far
+       # better than an absolute Dice value does.
+       MODELS="${MODELS:-Noisy,Clean,Uformer-L1,Uformer-Base,Uformer+PLcur,Uformer+FlatROI,Uformer+BSMaskL1,Uformer+L2,Uformer+SSIM5,Uformer+SSIM9,Uformer+MSSSIM,Uformer+Mix,Uformer+L2MSSSIM,Uformer+TV,Uformer+HighFreq,Uformer+BSFreq,Uformer+DAGAN,Uformer+BSComb,Uformer+PLEqual,Uformer+PLETonly}"
+       : "${MAX_SUBJ:=50}" ;;
+
   0)   # smoke: everything, tiny, one seed -- proves the plumbing only
        MODELS="${MODELS:-Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR-Base,Uformer-Base,SwinIR+PLcur,Uformer+PLcur,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+BSMaskL1,Uformer+BSMaskL1,SwinIR+Mix,Uformer+Mix,SwinIR+BSFreq,Uformer+BSFreq}"
        : "${EPOCHS:=2}" ; : "${SEG_EPOCHS:=2}" ; : "${MAX_SUBJ:=5}" ; : "${SEEDS:=1}" ;;
@@ -78,7 +91,7 @@ case "$PHASE" in
   5)   # ablation: does the nested BraTS hierarchy contribute anything?
        MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+PLdisj,Uformer+PLdisj}" ;;
 
-  *)   echo "PHASE must be 0 (smoke) 1 (convergence) 2 (decisive) 3 (conventional tier)"
+  *)   echo "PHASE must be uformer | uformer-fast | 0 (smoke) | 1 (convergence)"
        echo "                 4 (task-aware) or 5 (nested-vs-disjoint ablation); got '$PHASE'"
        exit 1 ;;
 esac
@@ -197,18 +210,14 @@ echo "    python3 aggregate_seeds.py --sweep_dir $SWEEP_DIR --out $SWEEP_DIR/tid
 echo ""
 echo "  THE DECISIVE TEST — does nested multi-region weighting beat flat binary?"
 echo "    python3 analyze_multiseed.py --tidy $SWEEP_DIR/tidy_results.csv \\"
-echo "        --margin 0.05 --baseline BinaryROI --treatment PathologyLoss-Eq3"
+echo "        --margin 0.05 --baseline BraSyn-MaskedL1 --treatment PathologyLoss"
 echo ""
 echo "  Does restoration help segmentation at all? (compare against the floor)"
 echo "    python3 analyze_multiseed.py --tidy $SWEEP_DIR/tidy_results.csv \\"
 echo "        --margin 0.05 --baseline noisy --treatment L1"
 echo ""
-echo "  Each remaining contrast:"
-echo "    --baseline L1        --treatment PathologyLoss-Eq3"
-echo "    --baseline L1        --treatment BinaryROI"
-echo "    --baseline L1        --treatment ROIFeature      # phase 2"
-echo "    --baseline L1        --treatment TaskFeedback    # phase 2"
-echo "    --baseline PathologyLoss-Eq3 --treatment TaskFeedback"
+echo "  Rank every loss in one table:"
+echo "    python3 compare_all_losses.py --run $SWEEP_DIR"
 
 [[ $FAILED -gt 0 ]] && exit 1
 exit 0
