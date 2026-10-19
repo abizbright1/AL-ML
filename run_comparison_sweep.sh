@@ -55,6 +55,20 @@ PHASE="${PHASE:-1}"
 # compute on competitors, then add competitors in order of how much they
 # threaten the novelty claim.
 case "$PHASE" in
+  final|F)
+       # THE PUBLICATION RUN. Uformer only, one seed, 50 epochs, the five
+       # objectives the argument actually needs, plus both reference arms.
+       # dump_slices is raised so the qualitative image figure has enough
+       # slices to choose a disagreeing one from.
+       MODELS="${MODELS:-Noisy,Clean,Uformer-L1,Uformer-Base,Uformer+PLcur,Uformer+FlatROI,Uformer+BSMaskL1}"
+       : "${EPOCHS:=50}" ; : "${SEG_EPOCHS:=20}" ; : "${SEEDS:=1}" ; : "${DUMP:=96}" ;;
+
+  final-all|FA)
+       # Same protocol, every objective. Roughly three times the compute of
+       # `final`; check the estimate the banner prints before committing.
+       MODELS="${MODELS:-Noisy,Clean,Uformer-L1,Uformer-Base,Uformer+PLcur,Uformer+FlatROI,Uformer+BSMaskL1,Uformer+L2,Uformer+SSIM9,Uformer+MSSSIM,Uformer+Mix,Uformer+TV,Uformer+BSFreq,Uformer+DAGAN,Uformer+PLEqual,Uformer+PLETonly}"
+       : "${EPOCHS:=50}" ; : "${SEG_EPOCHS:=20}" ; : "${SEEDS:=1}" ; : "${DUMP:=96}" ;;
+
   uformer|U)
        # EVERYTHING on Uformer, one invocation. Both segmentors are trained
        # once, so every loss is scored by the identical frozen judge and the
@@ -91,7 +105,7 @@ case "$PHASE" in
   5)   # ablation: does the nested BraTS hierarchy contribute anything?
        MODELS="${MODELS:-Noisy,Clean,SwinIR+PLcur,Uformer+PLcur,SwinIR+PLdisj,Uformer+PLdisj}" ;;
 
-  *)   echo "PHASE must be uformer | uformer-fast | 0 (smoke) | 1 (convergence)"
+  *)   echo "PHASE must be final | final-all | uformer | uformer-fast | 0 (smoke)"
        echo "                 4 (task-aware) or 5 (nested-vs-disjoint ablation); got '$PHASE'"
        exit 1 ;;
 esac
@@ -144,6 +158,10 @@ echo "  epochs    : $EPOCHS (recon) / $SEG_EPOCHS (seg, x2 segmentors)"
 echo "  subjects  : $MAX_SUBJ    device: $DEVICE"
 echo "  output    : $SWEEP_DIR"
 [[ $DRY_RUN -eq 1 ]] && echo "  MODE      : DRY RUN — nothing will be trained"
+N_TRAIN=$(awk -F, '{n=0; for(i=1;i<=NF;i++) if ($i!="Noisy" && $i!="Clean") n++; print n}' <<< "$MODELS")
+EST_H=$(awk -v n="$N_TRAIN" -v e="$EPOCHS" -v s="$N_SEEDS" -v m="$MAX_SUBJ" \
+  'BEGIN{printf "%.0f", n*s*(e/10.0)*(m/100.0)*1.7 + s*0.6}')
+echo "  est. runtime: ~${EST_H} h   ($N_TRAIN trained models x $N_SEEDS seed(s))"
 echo "══════════════════════════════════════════════════════════════════════"
 
 N=0; RAN=0; SKIPPED=0; FAILED=0; FAILED_SEEDS=""

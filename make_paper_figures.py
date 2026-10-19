@@ -225,13 +225,15 @@ def main():
         ax.set_title(bb, pad=6)
         for yi, v in zip(y, mu):
             ax.text(v + 0.004, yi, f'{v:.3f}', va='center', fontsize=7, color=INK)
+    # Legend goes BELOW the axes. Inside, it lands on the lowest bar and
+    # collides with that bar's value label at any useful figure width.
     if floor is not None and ceil is not None:
-        axes[0][0].legend(handles=[
-            plt.Line2D([], [], color=FLOOR_C, ls=':', lw=1.2,
-                       label=f'no restoration ({floor:.3f})'),
-            plt.Line2D([], [], color=CEIL_C, ls='--', lw=1.2,
-                       label=f'clean image ({ceil:.3f})')],
-            loc='lower right')
+        fig.legend(handles=[
+            plt.Line2D([], [], color=FLOOR_C, ls=':', lw=1.4,
+                       label=f'no restoration  {floor:.3f}'),
+            plt.Line2D([], [], color=CEIL_C, ls='--', lw=1.4,
+                       label=f'clean image  {ceil:.3f}')],
+            loc='lower center', ncol=2, bbox_to_anchor=(0.5, -0.06))
     fig.suptitle('Enhancing-tumour segmentation by training objective', y=1.0)
     save(fig, 'fig1_accuracy_by_loss')
 
