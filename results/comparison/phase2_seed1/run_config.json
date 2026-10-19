@@ -1,0 +1,24 @@
+{
+  "args": {
+    "data_dir": "/Users/oba007/Downloads/BraTS2021_data",
+    "epochs": 10,
+    "seg_epochs": 10,
+    "max_subjects": 100,
+    "split_seed": 42,
+    "patch_size": 96,
+    "sigma": 0.08,
+    "batch_size": 4,
+    "seed": 1,
+    "device": "mps",
+    "out": "/Users/oba007/AL-ML/results/comparison/phase2_seed1",
+    "dump_slices": 48,
+    "ckpt_every": 25,
+    "figures_only": false,
+    "models": "Noisy,Clean,SwinIR-L1,Uformer-L1,SwinIR-Base,Uformer-Base,SwinIR+PLcur,Uformer+PLcur,SwinIR+FlatROI,Uformer+FlatROI,SwinIR+BSMaskL1,Uformer+BSMaskL1"
+  },
+  "device": "mps",
+  "git_sha": "8cc61b28f43b172414efd3fab72b63371e25d48f",
+  "git_dirty": true,
+  "torch": "2.8.0",
+  "started": "2026-10-18 12:22:08"
+}
