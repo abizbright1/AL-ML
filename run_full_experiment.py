@@ -968,14 +968,31 @@ def fig_metrics(results, fig_dir):
     fig.suptitle('Metrics — all models', fontsize=13, fontweight='bold')
     for ax, key in zip(axes, ['PSNR', 'Dice_WT', 'Dice_TC', 'Dice_ET']):
         vals = [float(r[key]) for r in results]
-        ax.bar(range(len(vals)), vals, color=colours, edgecolor='black', lw=.5)
+        # The clean-image arm reconstructs itself exactly, so its PSNR is
+        # +inf and a Dice can be NaN where no subject has that region. Scale
+        # the axis from the finite bars only, draw a non-finite bar to the
+        # top, and label it for what it is instead of with a number.
+        fin = [v for v in vals if np.isfinite(v)]
+        if not fin:
+            continue
+        lo, hi = min(fin) * .95, max(fin) * 1.03
+        if hi <= lo:
+            hi = lo + 1e-6
+        ax.bar(range(len(vals)),
+               [v if np.isfinite(v) else hi for v in vals],
+               color=colours, edgecolor='black', lw=.5)
         ax.set_xticks(range(len(vals)))
         ax.set_xticklabels(shorts, rotation=30, ha='right', fontsize=8)
         ax.set_title(key + (' (dB)' if key == 'PSNR' else ''), fontweight='bold')
-        ax.set_ylim(min(vals) * .95, max(vals) * 1.03)
+        ax.set_ylim(lo, hi)
         ax.yaxis.grid(True, alpha=.4); ax.set_axisbelow(True)
         for i, v in enumerate(vals):
-            ax.text(i, v, f'{v:.3f}', ha='center', va='bottom', fontsize=7)
+            if np.isfinite(v):
+                ax.text(i, v, f'{v:.3f}', ha='center', va='bottom', fontsize=7)
+            else:
+                ax.text(i, lo + (hi - lo) * .5, '∞' if v > 0 else 'n/a',
+                        ha='center', va='center', fontsize=10,
+                        fontweight='bold', color='white')
     _save(fig, os.path.join(fig_dir, 'fig06_metrics_bars.png'))
 
 
