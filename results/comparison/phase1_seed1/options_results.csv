@@ -1,0 +1,9 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+Noisy input (no restoration) [FLOOR],Noisy,21.8442,0.8378,0.3117,0.8839,0.6473,0.6375,58,0,False
+Clean image (oracle) [CEILING],Clean,inf,1.0000,0.0000,0.8564,0.5759,0.7198,58,4,False
+SwinIR + PathologyLoss (Eq.3),SwinIR+PL3,23.9153,0.8742,0.2646,0.6625,0.5730,0.5049,58,0,False
+Uformer + PathologyLoss (Eq.3),Uformer+PL3,20.9732,0.7417,0.3710,0.5254,0.5691,0.5329,58,1,False
+SwinIR + binary ROI [ROIRecNet-style],SwinIR+ROI,25.3102,0.9059,0.2195,0.7656,0.0000,0.0000,58,10,False
+Uformer + binary ROI [ROIRecNet-style],Uformer+ROI,21.8344,0.7510,0.3309,0.7510,0.0000,0.0000,58,10,False
+SwinIR-lite (L1),SwinIR-L1,25.3568,0.9230,0.2119,0.6787,0.0532,0.0625,58,6,False
+Uformer-lite (L1),Uformer-L1,21.6391,0.7138,0.3366,0.8053,0.0000,0.0000,58,10,False

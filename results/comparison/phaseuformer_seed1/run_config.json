@@ -1,0 +1,24 @@
+{
+  "args": {
+    "data_dir": "/Users/oba007/Downloads/BraTS2021_data",
+    "epochs": 10,
+    "seg_epochs": 10,
+    "max_subjects": 100,
+    "split_seed": 42,
+    "patch_size": 96,
+    "sigma": 0.08,
+    "batch_size": 4,
+    "seed": 1,
+    "device": "mps",
+    "out": "/Users/oba007/AL-ML/results/comparison/phaseuformer_seed1",
+    "dump_slices": 48,
+    "ckpt_every": 25,
+    "figures_only": false,
+    "models": "Noisy,Clean,Uformer-L1,Uformer-Base,Uformer+PLcur,Uformer+FlatROI,Uformer+BSMaskL1,Uformer+L2,Uformer+SSIM5,Uformer+SSIM9,Uformer+MSSSIM,Uformer+Mix,Uformer+L2MSSSIM,Uformer+TV,Uformer+HighFreq,Uformer+BSFreq,Uformer+DAGAN,Uformer+BSComb,Uformer+PLEqual,Uformer+PLETonly"
+  },
+  "device": "mps",
+  "git_sha": "d1eb00bf002f62ccb04c1554c7be71c9fadcf724",
+  "git_dirty": true,
+  "torch": "2.8.0",
+  "started": "2026-10-19 13:48:28"
+}

@@ -1,0 +1,13 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+Noisy input (no restoration) [FLOOR],Noisy,21.8067,0.8393,0.2657,0.5703,0.2161,0.2402,1206,151,False
+Clean image (oracle) [CEILING],Clean,inf,1.0000,0.0000,0.7283,0.6256,0.6597,1206,421,False
+"SwinIR + PathologyLoss (current, nested)",SwinIR+PLcur,30.8480,0.9768,0.0933,0.7140,0.5710,0.5848,1206,425,False
+"Uformer + PathologyLoss (current, nested)",Uformer+PLcur,31.0251,0.9777,0.0922,0.7237,0.5975,0.5909,1206,436,False
+SwinIR + matched base (no pathology) [CONTROL],SwinIR-Base,31.3945,0.9795,0.0875,0.7121,0.5583,0.5474,1206,448,False
+Uformer + matched base (no pathology) [CONTROL],Uformer-Base,31.8020,0.9815,0.0838,0.7298,0.5685,0.5752,1206,458,False
+SwinIR + FlatROI [ROIRecNet-inspired],SwinIR+FlatROI,31.1900,0.9788,0.0899,0.7089,0.5725,0.5641,1206,442,False
+Uformer + FlatROI [ROIRecNet-inspired],Uformer+FlatROI,31.6344,0.9807,0.0853,0.7247,0.6030,0.6015,1206,450,False
+SwinIR-lite (L1),SwinIR-L1,31.1704,0.9784,0.0901,0.7142,0.5529,0.5498,1206,447,False
+Uformer-lite (L1),Uformer-L1,31.3364,0.9789,0.0890,0.7164,0.5462,0.5509,1206,455,False
+SwinIR + masked L1 w=0.5 [BraSyn 2023],SwinIR+BSMaskL1,31.4410,0.9795,0.0870,0.7134,0.5348,0.5229,1206,455,False
+Uformer + masked L1 w=0.5 [BraSyn 2023],Uformer+BSMaskL1,31.9625,0.9819,0.0822,0.7232,0.5797,0.5749,1206,452,False

@@ -1,0 +1,6 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+PP-MAE (Swin) [PROPOSED],PP-MAE,20.8632,0.7282,0.3511,0.8446,0.7843,0.6414,62,16,True
+SwinIR-lite (L1),SwinIR-L1,25.6740,0.9151,0.1930,0.8514,0.5347,0.4337,62,16,False
+Uformer-lite (L1),Uformer-L1,21.7418,0.7707,0.3001,0.6959,0.1419,0.0167,62,17,False
+SwinIR + PathologyLoss,SwinIR+PL,25.1008,0.8875,0.2162,0.7822,0.6872,0.5844,62,16,False
+Uformer + PathologyLoss,Uformer+PL,19.1251,0.6698,0.4173,0.4698,0.1959,0.1234,62,0,False

@@ -1,0 +1,145 @@
+
+Device   : mps
+Epochs   : 2   Seg epochs: 10
+Seed     : 1   (MPS: seeded, not bit-deterministic)
+Git SHA  : c52f8cc3  (DIRTY)
+Output   : /Users/oba007/AL-ML/results/comparison/phase1_seed1
+
+[BraTSDataset] Found 5 subjects under /Users/oba007/Downloads/BraTS2021_data
+[BraTSDataset] Total slices in index: 307
+  SUBJECTS  train 4 | val 1 | overlap 0
+  train 249 slices | val 58 slices
+  Split is by SUBJECT — no patient appears in both sets.
+
+=== SEGMENTOR (clean images) ===
+  [seg] Ep  1/10  loss=0.8223
+  [seg] Ep  5/10  loss=0.1787
+  [seg] Ep 10/10  loss=0.1193
+Segmentor frozen.
+
+
+=== AUXILIARY SEGMENTOR (for LIDnet-style arms) ===
+  [aux] Ep  1/10  loss=0.6223
+  [aux] Ep  5/10  loss=0.1905
+  [aux] Ep 10/10  loss=0.1097
+  Auxiliary segmentor is separate from the evaluation segmentor.
+
+  training 8 of 19 models: ['Clean', 'Noisy', 'SwinIR+PL3', 'SwinIR+ROI', 'SwinIR-L1', 'Uformer+PL3', 'Uformer+ROI', 'Uformer-L1']
+
+
+================================================================
+  Noisy input (no restoration) [FLOOR]
+================================================================
+    reference arm — no training
+    PSNR=21.84  SSIM=0.838  Dice_TC=0.647  Dice_ET=0.638
+    0/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/Noisy.pt    [0.1 min]
+
+================================================================
+  Clean image (oracle) [CEILING]
+================================================================
+    reference arm — no training
+    PSNR=inf  SSIM=1.000  Dice_TC=0.576  Dice_ET=0.720
+    4/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/Clean.pt    [0.1 min]
+
+================================================================
+  SwinIR + PathologyLoss (Eq.3)
+================================================================
+    Ep   1/2  loss=0.5138
+    Ep   2/2  loss=0.2677
+    PSNR=23.92  SSIM=0.874  Dice_TC=0.573  Dice_ET=0.505
+    0/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/SwinIRplusPL3.pt    [0.7 min]
+
+================================================================
+  Uformer + PathologyLoss (Eq.3)
+================================================================
+    Ep   1/2  loss=0.5956
+    Ep   2/2  loss=0.3730
+    PSNR=20.97  SSIM=0.742  Dice_TC=0.569  Dice_ET=0.533
+    1/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/UformerplusPL3.pt    [0.7 min]
+
+================================================================
+  SwinIR + binary ROI [ROIRecNet-style]
+================================================================
+    Ep   1/2  loss=0.0680
+    Ep   2/2  loss=0.0385
+    PSNR=25.31  SSIM=0.906  Dice_TC=0.000  Dice_ET=0.000
+    10/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/SwinIRplusROI.pt    [0.7 min]
+
+================================================================
+  Uformer + binary ROI [ROIRecNet-style]
+================================================================
+    Ep   1/2  loss=0.1054
+    Ep   2/2  loss=0.0539
+    PSNR=21.83  SSIM=0.751  Dice_TC=0.000  Dice_ET=0.000
+    10/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/UformerplusROI.pt    [0.6 min]
+
+================================================================
+  SwinIR-lite (L1)
+================================================================
+    Ep   1/2  loss=0.0586
+    Ep   2/2  loss=0.0364
+    PSNR=25.36  SSIM=0.923  Dice_TC=0.053  Dice_ET=0.063
+    6/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/SwinIR-L1.pt    [0.7 min]
+
+================================================================
+  Uformer-lite (L1)
+================================================================
+    Ep   1/2  loss=0.0965
+    Ep   2/2  loss=0.0631
+    PSNR=21.64  SSIM=0.714  Dice_TC=0.000  Dice_ET=0.000
+    10/58 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phase1_seed1/checkpoints/Uformer-L1.pt    [0.6 min]
+
+================================================================================
+  RESULTS
+================================================================================
+Method                            PSNR    SSIM   Dice_WT   Dice_TC   Dice_ET  mask?
+-----------------------------------------------------------------------------------
+  Noisy                          21.84   0.838     0.884     0.647     0.637      -
+  Clean                            inf   1.000     0.856     0.576     0.720      -
+  SwinIR+PL3                     23.92   0.874     0.662     0.573     0.505      -
+  Uformer+PL3                    20.97   0.742     0.525     0.569     0.533      -
+  SwinIR+ROI                     25.31   0.906     0.766     0.000     0.000      -
+  Uformer+ROI                    21.83   0.751     0.751     0.000     0.000      -
+  SwinIR-L1                      25.36   0.923     0.679     0.053     0.062      -
+  Uformer-L1                     21.64   0.714     0.805     0.000     0.000      -
+===================================================================================
+
+=== FIGURES ===
+
+  figures use slice 10 (subject BraTS2021_00003) — chosen for max disagreement
+
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig01_data_sample.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig02_noise_added.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig03_denoised_all_models.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig04_error_maps_all_models.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig05_segmentation_all_models.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig09_tumour_regions.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig10_noise_progression.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig11_pathology_weight_map.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig12_loss_heatmap.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig13_pipeline.png
+  saved /Users/oba007/AL-ML/results/comparison/phase1_seed1/figures/fig14_cross_modal.png
+Traceback (most recent call last):
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 1343, in <module>
+    main()
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 1334, in main
+    make_all_figures(args.out, args.sigma, results, histories)
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 1146, in make_all_figures
+    fig_metrics(results, fig_dir)
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 808, in fig_metrics
+    ax.set_ylim(min(vals) * .95, max(vals) * 1.03)
+  File "/Users/oba007/Library/Python/3.9/lib/python/site-packages/matplotlib/axes/_base.py", line 3973, in set_ylim
+    return self.yaxis._set_lim(bottom, top, emit=emit, auto=auto)
+  File "/Users/oba007/Library/Python/3.9/lib/python/site-packages/matplotlib/axis.py", line 1237, in _set_lim
+    v1 = self.axes._validate_converted_limits(v1, self.convert_units)
+  File "/Users/oba007/Library/Python/3.9/lib/python/site-packages/matplotlib/axes/_base.py", line 3660, in _validate_converted_limits
+    raise ValueError("Axis limits cannot be NaN or Inf")
+ValueError: Axis limits cannot be NaN or Inf
