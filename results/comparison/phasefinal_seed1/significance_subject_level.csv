@@ -1,0 +1,19 @@
+Region,Proposed,Baseline,N_subjects,Mean_diff,p_raw,p_holm,Significant_0.05
+DICE_WT,"Uformer + PathologyLoss (current, nested)",Clean image (oracle) [CEILING],20,-0.0162,0.00143242,0.0186214,yes
+DICE_WT,"Uformer + PathologyLoss (current, nested)",Noisy input (no restoration) [FLOOR],20,+0.0745,0.0106888,0.128265,no
+DICE_WT,"Uformer + PathologyLoss (current, nested)",Uformer + FlatROI [ROIRecNet-inspired],20,+0.0005,0.956329,1,no
+DICE_WT,"Uformer + PathologyLoss (current, nested)",Uformer + masked L1 w=0.5 [BraSyn 2023],20,-0.0016,0.521673,1,no
+DICE_WT,"Uformer + PathologyLoss (current, nested)",Uformer + matched base (no pathology) [CONTROL],20,+0.0022,0.545876,1,no
+DICE_WT,"Uformer + PathologyLoss (current, nested)",Uformer-lite (L1),20,+0.0058,0.08255,0.74295,no
+DICE_TC,"Uformer + PathologyLoss (current, nested)",Clean image (oracle) [CEILING],20,-0.0351,0.0106888,0.128265,no
+DICE_TC,"Uformer + PathologyLoss (current, nested)",Noisy input (no restoration) [FLOOR],20,+0.3413,9.53674e-06,0.000171661,yes
+DICE_TC,"Uformer + PathologyLoss (current, nested)",Uformer + FlatROI [ROIRecNet-inspired],20,+0.0282,0.0136166,0.136166,no
+DICE_TC,"Uformer + PathologyLoss (current, nested)",Uformer + masked L1 w=0.5 [BraSyn 2023],20,+0.0155,0.245487,1,no
+DICE_TC,"Uformer + PathologyLoss (current, nested)",Uformer + matched base (no pathology) [CONTROL],20,-0.0017,0.956329,1,no
+DICE_TC,"Uformer + PathologyLoss (current, nested)",Uformer-lite (L1),20,+0.0349,0.000394821,0.00592232,yes
+DICE_ET,"Uformer + PathologyLoss (current, nested)",Clean image (oracle) [CEILING],20,-0.0450,0.000292564,0.00468103,yes
+DICE_ET,"Uformer + PathologyLoss (current, nested)",Noisy input (no restoration) [FLOOR],20,+0.2709,0.000155096,0.00263663,yes
+DICE_ET,"Uformer + PathologyLoss (current, nested)",Uformer + FlatROI [ROIRecNet-inspired],19,+0.0242,0.104156,0.833252,no
+DICE_ET,"Uformer + PathologyLoss (current, nested)",Uformer + masked L1 w=0.5 [BraSyn 2023],20,+0.0119,0.493901,1,no
+DICE_ET,"Uformer + PathologyLoss (current, nested)",Uformer + matched base (no pathology) [CONTROL],19,-0.0084,0.515278,1,no
+DICE_ET,"Uformer + PathologyLoss (current, nested)",Uformer-lite (L1),20,+0.0276,0.00111563,0.0156188,yes

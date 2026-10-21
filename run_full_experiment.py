@@ -998,7 +998,13 @@ def fig_metrics(results, fig_dir):
 
 def fig_paradox(results, fig_dir):
     fig, ax = plt.subplots(figsize=(7.5, 5.6))
+    skipped = []
     for r in results:
+        # The clean-image arm has PSNR = +inf, which has no position on this
+        # axis. Note it under the plot instead of letting it break autoscale.
+        if not (np.isfinite(float(r['PSNR'])) and np.isfinite(float(r['Dice_ET']))):
+            skipped.append(r['Short'])
+            continue
         prop = 'PROPOSED' in r['Method']
         ax.scatter(float(r['PSNR']), float(r['Dice_ET']),
                    s=190 if prop else 110,
@@ -1012,6 +1018,9 @@ def fig_paradox(results, fig_dir):
     ax.set_title('The PSNR paradox\nbest picture is not the best for the tumour',
                  fontweight='bold')
     ax.grid(alpha=.35); ax.set_axisbelow(True)
+    if skipped:
+        ax.text(.5, -.14, 'not plotted (PSNR undefined): ' + ', '.join(skipped),
+                transform=ax.transAxes, ha='center', fontsize=8, color='#555555')
     _save(fig, os.path.join(fig_dir, 'fig07_psnr_paradox.png'))
 
 
@@ -1234,10 +1243,16 @@ def subject_level_stats(out_dir):
                     by.setdefault((m, reg), {}).setdefault(s, []).append(float(v))
 
     methods = sorted({m for m, _ in by})
-    proposed = next((m for m in methods if 'PROPOSED' in m), None)
+    # The [PROPOSED] tag is added in-memory when the arm list is built and is
+    # NOT written into per_slice_metrics.csv, so matching on it alone silently
+    # skipped these stats on every run read back from disk. Fall back to the
+    # objective's name.
+    proposed = next((m for m in methods if 'PROPOSED' in m), None) \
+        or next((m for m in methods if 'PathologyLoss' in m), None)
     if proposed is None:
-        print('  no [PROPOSED] method found — skipping stats')
+        print('  no proposed method found — skipping stats')
         return
+    print(f'  proposed arm: {proposed}')
 
     tests = []
     for reg in ('dice_wt', 'dice_tc', 'dice_et'):
