@@ -1,0 +1,8 @@
+Method,Reported,Fair,Delta,FP_rate,N_scored,N_positive,N_negative,N_false_pos
+Noisy input (no restoration) [FLOOR],0.3261,0.4636,0.1375,0.6582,1045,735,471,310
+Clean image (oracle) [CEILING],0.6714,0.7289,0.0575,0.1338,798,735,471,63
+"Uformer + PathologyLoss (current, nested)",0.6284,0.6652,0.0368,0.0913,778,735,471,43
+Uformer + matched base (no pathology) [CONTROL],0.6407,0.6634,0.0227,0.0552,761,735,471,26
+Uformer + FlatROI [ROIRecNet-inspired],0.6155,0.6364,0.0209,0.0531,760,735,471,25
+Uformer-lite (L1),0.6075,0.6241,0.0165,0.0425,755,735,471,20
+Uformer + masked L1 w=0.5 [BraSyn 2023],0.6248,0.6512,0.0264,0.0658,766,735,471,31

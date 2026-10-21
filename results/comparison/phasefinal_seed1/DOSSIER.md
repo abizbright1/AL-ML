@@ -251,12 +251,68 @@ Paired contrasts under the BraTS convention:
 | PathologyLoss − FlatROI | +0.0001 | 0.784 | 10/20 |
 | MatchedBase − L1 | +0.0213 | 0.012 | 16/20 |
 
-**This is the most important robustness result in the run.** The one significant
-Dice win PathologyLoss had — beating L1 by +0.0276, p=0.0011 — falls to +0.0058,
-p=0.37 under the standard convention. It was an artefact of the scoring rule. The
-only Dice effect that survives both conventions is **MatchedBase over L1**.
+The one significant Dice win PathologyLoss had — beating L1 by +0.0276, p=0.0011 —
+falls to +0.0058, p=0.37 under the standard convention. Neither convention is
+satisfactory, because both let the *denominator* depend on the model: an arm that
+predicts ET more liberally is scored on more slices and collects extra zeros. §5.4b
+removes that confound and changes the conclusion.
 
-A reviewer will check this. It needs to be in the paper, not discovered at review.
+### 5.4b Equal-denominator Dice and the false-positive rate
+
+`analyze_fair_dice.py` recovers the ground truth from the CSV (a slice is
+ET-positive iff no arm reports NaN, since a non-empty ground truth makes NaN
+impossible), then scores every arm on the **same 735 ET-positive slices** and
+reports over-prediction separately. Ground truth: 735 of 1206 slices contain ET,
+471 do not (39.1% empty).
+
+Subject-level (n=19–20):
+
+| Arm | fair Dice_ET | FP rate | slices excluded as-run |
+|---|---|---|---|
+| L1 | 0.6034 | 8.8% | 451 |
+| FlatROI | 0.6146 | 9.5% | 446 |
+| BraSyn | 0.6281 | 7.2% | 440 |
+| **PathologyLoss** | **0.6509** | **13.1%** | **428** |
+| MatchedBase | 0.6498 | 8.9% | 445 |
+
+Paired, fair Dice_ET:
+
+| Contrast | Δ | p | won |
+|---|---|---|---|
+| PathologyLoss − L1 | **+0.0475** | **<0.0001** | **18/19** |
+| PathologyLoss − FlatROI | **+0.0364** | **0.0020** | 15/19 |
+| PathologyLoss − BraSyn | +0.0228 | 0.169 | 11/19 |
+| PathologyLoss − MatchedBase | +0.0011 | 0.768 | 11/19 |
+| MatchedBase − L1 | +0.0463 | <0.0001 | 18/19 |
+
+Paired, false-positive rate (**lower is better**):
+
+| Contrast | Δ | p | won |
+|---|---|---|---|
+| PathologyLoss − L1 | **+0.0424** | **0.012** | 8/20 |
+| PathologyLoss − BraSyn | **+0.0583** | **0.028** | 8/20 |
+| PathologyLoss − FlatROI | +0.0358 | 0.091 | 8/20 |
+| PathologyLoss − MatchedBase | +0.0414 | 0.209 | 10/20 |
+
+**This resolves the convention dependence with a mechanism.** PathologyLoss predicts
+enhancing tumour more liberally than any other trained arm — it has the fewest
+absent-in-both slices (428) and the highest false-positive rate (13.1% against
+8.8% for L1). Under the as-run convention those liberal predictions land on
+ET-negative slices as zeros and drag its mean Dice down. On an equal denominator
+they move into the FP rate where they belong, and its Dice rises to the top.
+
+So the three conventions are not three contradictory results; they are one result
+seen three ways. On a fair denominator PathologyLoss **significantly beats plain L1
+(+0.0475, 18/19 patients) and the flat-mask ablation (+0.0364)** — the nesting and
+the 3:2:1 ordering do contribute something over "just weight the tumour". It remains
+tied with its matched control (+0.0011, p=0.77) and with BraSyn (p=0.17). And it
+buys its sensitivity with significantly more false enhancing tumour than L1 or
+BraSyn.
+
+That trade — more ET found, more ET invented — is exactly what `fig7` renders as
+blue, and it is clinically material: over-calling enhancing tumour is not a benign
+failure mode. Reporting fair Dice without the FP rate would be misleading in the
+proposal's favour. **Report both, always.**
 
 ### 5.5 TOST equivalence, margin ±0.05 Dice_ET (fixed a priori)
 
@@ -315,7 +371,23 @@ epoch budget that flatters the hypothesis, after having seen both.
 | `run_config.json` | 4 KB | Full provenance: args, git SHA, dirty flag, torch version, device, timestamp. |
 | `paper_figures/table1_main_results.csv` / `.tex` | 4 KB | Subject-level summary with bootstrap 95% CIs. `.tex` drops into the manuscript. |
 | `options_results.csv` | 4 KB | Slice-level pooled means. **Descriptive only** — see §4(a). |
+| `significance_subject_level.csv` | 4 KB | Wilcoxon per region against every baseline, with **Holm correction** across all 18 comparisons. §5.2's numbers, formally corrected. |
+| `fair_dice_et.csv` | 4 KB | Equal-denominator Dice_ET and false-positive rate per arm (§5.4b). |
+| `compare_all_losses.csv` | 4 KB | Ranked table with %-of-floor-to-ceiling-gap closed. |
 | `paper_figures/README.txt` | 4 KB | Provenance of the figures: source CSV, ranking metric, floor/ceiling, palette CVD validation. |
+
+Holm-corrected results from `significance_subject_level.csv` — after correcting for
+18 comparisons, PathologyLoss significantly beats **plain L1 only**, and sits
+significantly *below* the clean-image ceiling:
+
+| Region | vs | Δ | p_holm | |
+|---|---|---|---|---|
+| Dice_TC | L1 | +0.0349 | 0.0059 | ✱ |
+| Dice_ET | L1 | +0.0276 | 0.0156 | ✱ |
+| Dice_ET | Clean (ceiling) | −0.0450 | 0.0047 | ✱ worse |
+| Dice_ET | MatchedBase | −0.0084 | 1.00 | ns |
+| Dice_ET | BraSyn | +0.0119 | 1.00 | ns |
+| Dice_ET | FlatROI | +0.0242 | 0.83 | ns |
 
 **Publication figures** — `paper_figures/`, each as 600-dpi vector PDF + PNG:
 
@@ -332,13 +404,23 @@ epoch budget that flatters the hypothesis, after having seen both.
 `fig5` currently renders a decomposition that §5.2 contradicts — it must be
 regenerated or retired. See §8.
 
-**Explanatory figures** — `figures/`, auto-generated during the run, slice 95 of
-BraTS2021_00014 (chosen for maximum inter-arm disagreement): `fig01_data_sample`,
-`fig02_noise_added`, `fig03_denoised_all_models`, `fig04_error_maps_all_models`,
-`fig05_segmentation_all_models`, `fig09_tumour_regions`, `fig10_noise_progression`,
+**Explanatory figures** — `figures/`, 15 PNGs, slice 95 of BraTS2021_00014 (chosen
+for maximum inter-arm disagreement): `fig01_data_sample`, `fig02_noise_added`,
+`fig03_denoised_all_models`, `fig04_error_maps_all_models`,
+`fig05_segmentation_all_models`, `fig06_metrics_bars`, `fig07_psnr_paradox`,
+`fig08_loss_curves`, `fig09_tumour_regions`, `fig10_noise_progression`,
 `fig11_pathology_weight_map`, `fig12_loss_heatmap`, `fig13_pipeline`,
-`fig14_cross_modal`. These are teaching/illustration assets, suitable for the
-presentation and for a methods figure.
+`fig14_cross_modal`, `fig15_results_table`. Teaching and illustration assets,
+suitable for the presentation and for a methods figure.
+
+Four of these — `fig06`, `fig07`, `fig08`, `fig15` — were **not** produced by the
+run. The crash in §7 aborted figure generation before they were reached, and
+`subject_level_stats` never ran either. All four were regenerated afterwards from
+the committed CSVs. `fig08` is the one with a caveat: per-epoch loss histories are
+held in memory and never written to disk, so they were lost with the crash. It is
+rebuilt from the losses the log printed at 5-epoch intervals — real measured
+values, coarser resolution, and the figure states this on its face. True per-epoch
+curves would need a re-run plus history persistence.
 
 **Logs:** `final.log` (sweep-level trace, the arm-by-arm results table, and the
 traceback) and `results/comparison/logs/phasefinal_seed1.log` (per-arm detail).
@@ -359,10 +441,21 @@ training. They are the most valuable un-backed-up artefact in the project.
 ### 6.3 Reproducing the analysis
 
 ```
-python3 analyze_final_run.py     # §5.1–5.3 paired contrasts
-python3 make_paper_figures.py --run results/comparison/phasefinal_seed1
-python3 make_qualitative_figure.py --run results/comparison/phasefinal_seed1 --backbone Uformer
+R=results/comparison/phasefinal_seed1
+python3 analyze_final_run.py                      # §5.1-5.3 paired contrasts
+python3 analyze_fair_dice.py $R/per_slice_metrics.csv --out $R/fair_dice_et.csv
+python3 compare_all_losses.py --run $R --csv $R/compare_all_losses.csv
+python3 make_paper_figures.py --run $R
+python3 make_qualitative_figure.py --run $R --backbone Uformer   # needs predictions/*.npz, Mac only
 ```
+
+`significance_subject_level.csv` is written by `subject_level_stats()` inside
+`run_full_experiment.py`; see §7 for the bug that stopped it running.
+
+Scripts in the repo **not** applicable to this run, for the record:
+`final_results_analysis.py` and `full_analysis.py` target the older Round-4
+results; `aggregate_seeds.py` and `analyze_multiseed.py` need a multi-seed sweep,
+which this run is not; `verify_pathologyloss.py` is a pre-run integrity check.
 
 ---
 
@@ -384,7 +477,19 @@ exit code and could not know the science had already succeeded.
 
 Fixed in commit `f3d981d`: the axis is now scaled from finite bars only, and a
 non-finite bar is drawn to the top of the axis and labelled `∞` rather than with a
-number. Verified against both `inf` and `NaN` inputs.
+number. `fig_paradox` carried the same latent fault and is guarded too. Verified
+against both `inf` and `NaN` inputs.
+
+### A second, independent bug
+
+`subject_level_stats()` selected the proposed arm by searching for `PROPOSED` in
+the method name. That tag is attached when the arm list is built in memory and is
+**never written into `per_slice_metrics.csv`** — so the function printed
+`no [PROPOSED] method found — skipping stats` and returned. It would have skipped
+on this run even without the crash, and on every prior run read back from disk.
+`significance_subject_level.csv` therefore did not exist for any run in this
+repository until now. Fixed by falling back to the objective name; the Holm-corrected
+table in §6.1 is its first output.
 
 ---
 
@@ -398,20 +503,33 @@ number. Verified against both `inf` and `NaN` inputs.
 2. It does so at a measurable cost in global fidelity — lowest global PSNR, worst
    NRMSE and SSIM_brain of the five trained arms. The trade-off is real,
    directional, and exactly what Eq. 3 was designed to produce. (§5.1)
-3. **Improved pathology-region fidelity did not transfer to segmentation accuracy.**
-   PathologyLoss is statistically equivalent to its own matched control, to BraSyn
-   2023, and to a flat tumour mask, within a pre-registered ±0.05 Dice margin.
-   (§5.2, §5.5)
-4. Restoration as a whole helps enormously: Dice_ET from 0.3186 (floor) to
+3. On an **equal denominator**, PathologyLoss significantly improves segmentation
+   over plain L1 (+0.0475, 18/19 patients, p<0.0001) and over a flat tumour mask
+   (+0.0364, p=0.002) — so the nesting and the 3:2:1 ordering do contribute
+   something beyond "weight the tumour". (§5.4b)
+4. It achieves that by predicting enhancing tumour **more liberally**: the highest
+   false-positive rate of any trained arm, 13.1% against 8.8% for L1, significantly
+   worse than both L1 (p=0.012) and BraSyn (p=0.028). Sensitivity bought with
+   specificity. (§5.4b)
+5. **It does not beat its own matched control on any Dice convention.** +0.0011
+   (p=0.77) on a fair denominator, −0.0084 (p=0.52) as run, −0.0156 (p=0.14) under
+   the BraTS rule. Pre-registered TOST declares them equivalent within ±0.05.
+   The pathology term adds nothing that the SSIM and cross-modal terms do not
+   already deliver. (§5.2, §5.4, §5.5)
+6. Nor does it beat the closest published prior art, BraSyn 2023: p=0.17 on a fair
+   denominator, p=0.49 as run, and with a significantly worse FP rate. (§5.4b)
+7. Restoration as a whole helps enormously: Dice_ET from 0.3186 (floor) to
    0.56–0.63, against a clean-image ceiling of 0.6345. (§5.1)
-5. On this cohort, the SSIM and cross-modal terms do all of the downstream work.
-   MatchedBase − L1 = +0.0375 (p=0.0012) is the only Dice effect that survives both
-   scoring conventions. (§5.2, §5.4)
+8. After **Holm correction** across all 18 comparisons, the only surviving wins
+   against a trained baseline are over plain L1 (Dice_TC p=0.006, Dice_ET p=0.016),
+   and PathologyLoss sits significantly below the ceiling (p=0.005). (§6.1)
 
 **Not supported — remove or rewrite:**
 
 - ~~"PathologyLoss improves downstream segmentation over the state of the art."~~
-  It is equivalent to BraSyn (p=0.49) and to its own control (p=0.52).
+  It is statistically indistinguishable from BraSyn and from its own control on
+  every Dice convention tested. It *does* beat plain L1 and the flat-mask ablation
+  on a fair denominator — claim that instead, with the FP rate attached.
 - ~~"Recovers 72% of the gap to the ceiling."~~ Computed from the old floor/ceiling
   (0.2435 / 0.6172). This run's are 0.3186 / 0.6345.
 - ~~"65% of the gain comes from SSIM, 35% from the pathology term."~~ At 50 epochs it
@@ -434,9 +552,12 @@ number. Verified against both `inf` and `NaN` inputs.
 4. **No tuning split.** Hyperparameters were not selected on held-out data
    independent of the 20 test patients.
 5. **No HD95.** Dice alone rewards finding tumour and does not symmetrically punish
-   inventing it — the exact failure mode `fig7` makes visible as blue. A boundary
-   metric would close this gap.
-6. **Dice convention is outcome-changing** (§5.4) and is not the BraTS standard.
+   inventing it — the exact failure mode `fig7` makes visible as blue and §5.4b
+   quantifies as a 13.1% FP rate. A boundary metric would close this gap and is the
+   single most valuable addition this study could still make.
+6. **The Dice convention is outcome-changing** (§5.4, §5.4b). The as-run rule is not
+   the BraTS standard, and neither rule holds the denominator fixed across arms.
+   Report the equal-denominator figure with the FP rate beside it.
 7. **Segmentor trained on clean images only.** An arm is rewarded for producing
    images that look like what the segmentor was trained on, which is a different
    objective from clinical utility.
@@ -448,13 +569,18 @@ number. Verified against both `inf` and `NaN` inputs.
 The run does not support the paper as currently written. It does support a
 defensible and, in one respect, more interesting paper:
 
-> Region-weighted restoration objectives do what they claim at the level of image
-> fidelity — targeted reconstruction error inside pathology falls measurably and
-> consistently — but on BraTS 2021 that improvement does not propagate to
-> downstream segmentation accuracy, where a well-chosen spatially-uniform objective
-> performs equivalently. We establish this with a matched control that isolates the
-> pathology term, five published baselines, patient-level inference, and
-> pre-registered equivalence testing.
+> Region-weighted restoration does what it claims at the level of image fidelity:
+> reconstruction error inside enhancing tumour falls measurably and consistently
+> (+0.94 dB PSNR_ET over L1, 19/19 patients), at a measurable cost in global
+> fidelity. On an equal-denominator evaluation this also yields better enhancing-
+> tumour segmentation than plain L1 and than flat tumour weighting — but it is
+> achieved by predicting enhancing tumour more liberally, with a significantly
+> higher false-positive rate, and it does **not** improve on a matched objective
+> that contains no pathology term at all, nor on the closest published prior art.
+> We establish this with a matched control isolating the pathology term, five
+> published baselines, patient-level inference, Holm correction, pre-registered
+> equivalence testing, and an equal-denominator Dice reported alongside its
+> false-positive rate.
 
 That negative-transfer result is a genuine contribution: the ROIRecNet / LIDnet /
 BraSyn line of work assumes the transfer and does not test it against a matched
