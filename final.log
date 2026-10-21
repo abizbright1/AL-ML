@@ -1,0 +1,224 @@
+══════════════════════════════════════════════════════════════════════
+  Benchmark comparison sweep — phase final
+──────────────────────────────────────────────────────────────────────
+  data      : /Users/oba007/Downloads/BraTS2021_data
+  arms      : 7
+              Noisy,Clean,Uformer-L1,Uformer-Base,Uformer+PLcur,Uformer+FlatROI,Uformer+BSMaskL1
+  seeds     : 1  (1)   split seed: 42 (fixed)
+  epochs    : 50 (recon) / 20 (seg, x2 segmentors)
+  subjects  : 100    device: mps
+  output    : /Users/oba007/AL-ML/results/comparison
+  est. runtime: ~43 h   (5 trained models x 1 seed(s))
+══════════════════════════════════════════════════════════════════════
+
+── [1/1] phase final  seed=1 ──────────────────────────────────────────────
+   out: /Users/oba007/AL-ML/results/comparison/phasefinal_seed1
+   log: /Users/oba007/AL-ML/results/comparison/logs/phasefinal_seed1.log
+
+Device   : mps
+Epochs   : 50   Seg epochs: 20
+Seed     : 1   (MPS: seeded, not bit-deterministic)
+Git SHA  : 3efe85df  (DIRTY)
+Output   : /Users/oba007/AL-ML/results/comparison/phasefinal_seed1
+
+[BraTSDataset] Found 100 subjects under /Users/oba007/Downloads/BraTS2021_data
+[BraTSDataset] Total slices in index: 5960
+  SUBJECTS  train 80 | val 20 | overlap 0   (split seed 42  FIXED, independent of run seed)
+  train 4754 slices | val 1206 slices
+  Split is by SUBJECT — no patient appears in both sets.
+
+=== SEGMENTOR (clean images) ===
+  [seg] Ep  1/20  loss=0.2704
+  [seg] Ep  5/20  loss=0.0953
+  [seg] Ep 10/20  loss=0.0729
+  [seg] Ep 15/20  loss=0.0627
+  [seg] Ep 20/20  loss=0.0567
+Segmentor frozen.
+
+
+=== AUXILIARY SEGMENTOR (for LIDnet-style arms) ===
+  [aux] Ep  1/20  loss=0.2429
+  [aux] Ep 10/20  loss=0.0752
+  [aux] Ep 20/20  loss=0.0595
+  Auxiliary segmentor is separate from the evaluation segmentor.
+
+  training 7 of 53 models: ['Clean', 'Noisy', 'Uformer+BSMaskL1', 'Uformer+FlatROI', 'Uformer+PLcur', 'Uformer-Base', 'Uformer-L1']
+
+
+================================================================
+  Noisy input (no restoration) [FLOOR]
+================================================================
+    reference arm — no training
+    PSNR=21.81  SSIM=0.839  Dice_TC=0.282  Dice_ET=0.326
+    161/1206 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/checkpoints/Noisy.pt    [1.2 min]
+
+================================================================
+  Clean image (oracle) [CEILING]
+================================================================
+    reference arm — no training
+    PSNR=inf  SSIM=1.000  Dice_TC=0.695  Dice_ET=0.671
+    408/1206 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/checkpoints/Clean.pt    [1.2 min]
+
+================================================================
+  Uformer + PathologyLoss (current, nested)
+================================================================
+    Ep   1/50  loss=0.4247
+    Ep   5/50  loss=0.2371
+    Ep  10/50  loss=0.2128
+    Ep  15/50  loss=0.2030
+    Ep  20/50  loss=0.1981
+    Ep  25/50  loss=0.1935
+    Ep  30/50  loss=0.1917
+    Ep  35/50  loss=0.1887
+    Ep  40/50  loss=0.1871
+    Ep  45/50  loss=0.1850
+    Ep  50/50  loss=0.1836
+    PSNR=32.43  SSIM=0.984  Dice_TC=0.661  Dice_ET=0.628
+    428/1206 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/checkpoints/UformerplusPLcur.pt    [380.1 min]
+
+================================================================
+  Uformer + matched base (no pathology) [CONTROL]
+================================================================
+    Ep   1/50  loss=0.1387
+    Ep   5/50  loss=0.0785
+    Ep  10/50  loss=0.0716
+    Ep  15/50  loss=0.0690
+    Ep  20/50  loss=0.0675
+    Ep  25/50  loss=0.0663
+    Ep  30/50  loss=0.0653
+    Ep  35/50  loss=0.0647
+    Ep  40/50  loss=0.0641
+    Ep  45/50  loss=0.0636
+    Ep  50/50  loss=0.0633
+    PSNR=32.81  SSIM=0.985  Dice_TC=0.669  Dice_ET=0.641
+    445/1206 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/checkpoints/Uformer-Base.pt    [383.7 min]
+
+================================================================
+  Uformer + FlatROI [ROIRecNet-inspired]
+================================================================
+    Ep   1/50  loss=0.1892
+    Ep   5/50  loss=0.1012
+    Ep  10/50  loss=0.0913
+    Ep  15/50  loss=0.0879
+    Ep  20/50  loss=0.0857
+    Ep  25/50  loss=0.0843
+    Ep  30/50  loss=0.0831
+    Ep  35/50  loss=0.0823
+    Ep  40/50  loss=0.0815
+    Ep  45/50  loss=0.0809
+    Ep  50/50  loss=0.0805
+    PSNR=32.76  SSIM=0.985  Dice_TC=0.644  Dice_ET=0.615
+    446/1206 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/checkpoints/UformerplusFlatROI.pt    [371.8 min]
+
+================================================================
+  Uformer-lite (L1)
+================================================================
+    Ep   1/50  loss=0.0365
+    Ep   5/50  loss=0.0200
+    Ep  10/50  loss=0.0182
+    Ep  15/50  loss=0.0174
+    Ep  20/50  loss=0.0169
+    Ep  25/50  loss=0.0165
+    Ep  30/50  loss=0.0163
+    Ep  35/50  loss=0.0161
+    Ep  40/50  loss=0.0160
+    Ep  45/50  loss=0.0159
+    Ep  50/50  loss=0.0158
+    PSNR=32.47  SSIM=0.984  Dice_TC=0.633  Dice_ET=0.608
+    451/1206 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/checkpoints/Uformer-L1.pt    [373.1 min]
+
+================================================================
+  Uformer + masked L1 w=0.5 [BraSyn 2023]
+================================================================
+    Ep   1/50  loss=0.1868
+    Ep   5/50  loss=0.0991
+    Ep  10/50  loss=0.0899
+    Ep  15/50  loss=0.0863
+    Ep  20/50  loss=0.0844
+    Ep  25/50  loss=0.0829
+    Ep  30/50  loss=0.0818
+    Ep  35/50  loss=0.0810
+    Ep  40/50  loss=0.0804
+    Ep  45/50  loss=0.0798
+    Ep  50/50  loss=0.0793
+    PSNR=32.88  SSIM=0.985  Dice_TC=0.654  Dice_ET=0.625
+    440/1206 slices had no ET (excluded from Dice_ET)
+    checkpoint -> /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/checkpoints/UformerplusBSMaskL1.pt    [389.7 min]
+
+================================================================================
+  RESULTS
+================================================================================
+Method                            PSNR    SSIM   Dice_WT   Dice_TC   Dice_ET  mask?
+-----------------------------------------------------------------------------------
+  Noisy                          21.81   0.839     0.679     0.282     0.326      -
+  Clean                            inf   1.000     0.769     0.695     0.671      -
+  Uformer+PLcur                  32.43   0.984     0.751     0.661     0.628      -
+  Uformer-Base                   32.81   0.985     0.751     0.669     0.641      -
+  Uformer+FlatROI                32.76   0.985     0.752     0.644     0.616      -
+  Uformer-L1                     32.47   0.985     0.747     0.633     0.608      -
+  Uformer+BSMaskL1               32.88   0.985     0.754     0.654     0.625      -
+===================================================================================
+
+=== FIGURES ===
+/Users/oba007/AL-ML/run_full_experiment.py:839: RuntimeWarning: All-NaN slice encountered
+  spread = np.nanmax(stacked, 0) - np.nanmin(stacked, 0)
+
+  figures use slice 95 (subject BraTS2021_00014) — chosen for max disagreement
+
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig01_data_sample.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig02_noise_added.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig03_denoised_all_models.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig04_error_maps_all_models.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig05_segmentation_all_models.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig09_tumour_regions.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig10_noise_progression.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig11_pathology_weight_map.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig12_loss_heatmap.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig13_pipeline.png
+  saved /Users/oba007/AL-ML/results/comparison/phasefinal_seed1/figures/fig14_cross_modal.png
+Traceback (most recent call last):
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 1512, in <module>
+    main()
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 1503, in main
+    make_all_figures(args.out, args.sigma, results, histories)
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 1313, in make_all_figures
+    fig_metrics(results, fig_dir)
+  File "/Users/oba007/AL-ML/run_full_experiment.py", line 975, in fig_metrics
+    ax.set_ylim(min(vals) * .95, max(vals) * 1.03)
+  File "/Users/oba007/Library/Python/3.9/lib/python/site-packages/matplotlib/axes/_base.py", line 3973, in set_ylim
+    return self.yaxis._set_lim(bottom, top, emit=emit, auto=auto)
+  File "/Users/oba007/Library/Python/3.9/lib/python/site-packages/matplotlib/axis.py", line 1237, in _set_lim
+    v1 = self.axes._validate_converted_limits(v1, self.convert_units)
+  File "/Users/oba007/Library/Python/3.9/lib/python/site-packages/matplotlib/axes/_base.py", line 3660, in _validate_converted_limits
+    raise ValueError("Axis limits cannot be NaN or Inf")
+ValueError: Axis limits cannot be NaN or Inf
+   ✗ FAILED (exit 1) after 2165 min — see /Users/oba007/AL-ML/results/comparison/logs/phasefinal_seed1.log
+
+══════════════════════════════════════════════════════════════════════
+  PHASE final FINISHED  —  36h 5m
+    completed this session : 0
+    skipped (already done) : 0
+    failed                 : 1
+  Failed:
+     seed=1  (/Users/oba007/AL-ML/results/comparison/logs/phasefinal_seed1.log)
+══════════════════════════════════════════════════════════════════════
+
+  Aggregate:
+    python3 aggregate_seeds.py --sweep_dir /Users/oba007/AL-ML/results/comparison --out /Users/oba007/AL-ML/results/comparison/tidy_results.csv
+
+  THE DECISIVE TEST — does nested multi-region weighting beat flat binary?
+    python3 analyze_multiseed.py --tidy /Users/oba007/AL-ML/results/comparison/tidy_results.csv \
+        --margin 0.05 --baseline BraSyn-MaskedL1 --treatment PathologyLoss
+
+  Does restoration help segmentation at all? (compare against the floor)
+    python3 analyze_multiseed.py --tidy /Users/oba007/AL-ML/results/comparison/tidy_results.csv \
+        --margin 0.05 --baseline noisy --treatment L1
+
+  Rank every loss in one table:
+    python3 compare_all_losses.py --run /Users/oba007/AL-ML/results/comparison

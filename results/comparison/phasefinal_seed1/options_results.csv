@@ -1,0 +1,8 @@
+Method,Short,PSNR,SSIM,NRMSE,Dice_WT,Dice_TC,Dice_ET,n_slices,n_et_undefined,MaskAtInference
+Noisy input (no restoration) [FLOOR],Noisy,21.8066,0.8391,0.2658,0.6792,0.2818,0.3261,1206,161,False
+Clean image (oracle) [CEILING],Clean,inf,1.0000,0.0000,0.7691,0.6948,0.6714,1206,408,False
+"Uformer + PathologyLoss (current, nested)",Uformer+PLcur,32.4265,0.9838,0.0779,0.7515,0.6612,0.6284,1206,428,False
+Uformer + matched base (no pathology) [CONTROL],Uformer-Base,32.8100,0.9852,0.0744,0.7512,0.6687,0.6407,1206,445,False
+Uformer + FlatROI [ROIRecNet-inspired],Uformer+FlatROI,32.7586,0.9850,0.0750,0.7520,0.6439,0.6155,1206,446,False
+Uformer-lite (L1),Uformer-L1,32.4748,0.9845,0.0773,0.7474,0.6329,0.6075,1206,451,False
+Uformer + masked L1 w=0.5 [BraSyn 2023],Uformer+BSMaskL1,32.8795,0.9853,0.0739,0.7538,0.6545,0.6248,1206,440,False
